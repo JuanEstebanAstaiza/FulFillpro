@@ -93,6 +93,43 @@ def spacer(ws, ncols):
     ws.row_dimensions[r].height = 6
 
 
+def company_strip(ws, ncols: int, company_name: str, company_code: str, license_code: str):
+    """Franja distintiva de la empresa contratante (anti reventa / uso ajeno)."""
+    label = f"LICENCIADO PARA: {company_name or 'CLIENTE'}"
+    if company_code:
+        label += f"  ·  CÓDIGO EMPRESA: {company_code}"
+    if license_code:
+        label += f"  ·  LIC. {license_code}"
+    label += "  ·  USO EXCLUSIVO — NO TRANSFERIBLE"
+    ws.append([label])
+    r = ws.max_row
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=ncols)
+    c = ws.cell(r, 1)
+    c.font = _font("FFFFFF", 9, True)
+    c.fill = _fill("0D3B12")
+    c.alignment = _align("left", False)
+    ws.row_dimensions[r].height = 20
+
+
+def brand_footer(ws, ncols: int, text: str):
+    ws.append([text])
+    r = ws.max_row
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=ncols)
+    c = ws.cell(r, 1)
+    c.font = Font(name="Calibri", color="546E7A", size=8, italic=True)
+    c.alignment = _align("left", True)
+    ws.row_dimensions[r].height = 28
+
+
+def apply_print_brand(ws, company_name: str, license_code: str):
+    ws.oddHeader.center.text = f"FulfillPro · {company_name}"
+    ws.oddHeader.center.font = "Calibri,Bold"
+    ws.oddHeader.center.size = 12
+    ws.oddFooter.left.text = f"Lic. {license_code} · Uso exclusivo {company_name}"
+    ws.oddFooter.center.text = "Página &P de &N"
+    ws.oddFooter.right.text = "Confidencial"
+
+
 def build_excel(
     resumen_final: list[dict[str, Any]],
     cant_cols: list[str],
@@ -101,10 +138,19 @@ def build_excel(
     prior: list[dict],
     total_riesgo: float,
     today: date,
+    company_name: str = "",
+    company_code: str = "",
+    license_code: str = "",
 ) -> bytes:
     wb = Workbook()
     today_str = today.strftime("%d/%m/%Y")
     now_str = datetime.now().strftime("%d/%m/%Y %H:%M")
+    co = company_name or "Cliente"
+    footer_txt = (
+        f"Generado por FulfillPro · {now_str} · Documento exclusivo para {co} "
+        f"({company_code or '—'}) · Licencia {license_code or '—'} · "
+        f"Prohibida la reventa o uso por otras empresas"
+    )
 
     total_uds = sum(
         int(row.get(c, 0) or 0)
@@ -116,6 +162,7 @@ def build_excel(
     ncols1 = 2 + cant_max
 
     # HOJA 1: RESUMEN
+    # Filas: 1 banner, 2 company, 3 metrics, 4 spacer, 5 headers, 6+ data
     ws1 = wb.active
     ws1.title = "Resumen"
     ws1.sheet_properties.tabColor = P["VC"]
@@ -125,7 +172,8 @@ def build_excel(
     for i in range(3, ncols1 + 1):
         ws1.column_dimensions[get_column_letter(i)].width = 9
 
-    banner(ws1, ncols1, "FulfillPro - Resumen de Ordenes para Bodega", P["VC"], 14, 30)
+    banner(ws1, ncols1, f"FulfillPro · {co} — Resumen de Órdenes para Bodega", P["VC"], 14, 30)
+    company_strip(ws1, ncols1, co, company_code, license_code)
     subtitle(
         ws1,
         ncols1,
@@ -135,12 +183,14 @@ def build_excel(
 
     ws1.append(["VARIACION", "PRODUCTO"] + [f"Cant. {i}" for i in range(1, cant_max + 1)])
     r = ws1.max_row
+    header_row = r
+    data_start = header_row + 1
     ws1.row_dimensions[r].height = 26
     hdr(ws1.cell(r, 1), P["GH"])
     hdr(ws1.cell(r, 2), P["GH"], "left")
     for ci in range(3, ncols1 + 1):
         hdr(ws1.cell(r, ci), P["VC"])
-    ws1.freeze_panes = "A5"
+    ws1.freeze_panes = f"A{data_start}"
 
     for i, row in enumerate(resumen_final):
         es_c = str(row.get("VARIABLES", "")).upper() == "COMBO"
@@ -174,12 +224,12 @@ def build_excel(
         c.fill = _fill(P["GH"])
         c.border = Border(top=_SM, bottom=_SM)
 
-    ld = 4 + len(resumen_final)
+    data_end = data_start + len(resumen_final) - 1 if resumen_final else data_start
     ws1.append(
         [""]
         + [f"TOTAL - {total_uds} unidades"]
         + [
-            f"=SUM({get_column_letter(ci + 3)}5:{get_column_letter(ci + 3)}{ld})"
+            f"=SUM({get_column_letter(ci + 3)}{data_start}:{get_column_letter(ci + 3)}{data_end})"
             for ci in range(cant_max)
         ]
     )
@@ -191,21 +241,16 @@ def build_excel(
     for ci in range(3, ncols1 + 1):
         hdr(ws1.cell(r, ci), P["VM"])
 
-    ws1.append([f"Generado por FulfillPro - {now_str}"])
-    r = ws1.max_row
-    ws1.merge_cells(start_row=r, start_column=1, end_row=r, end_column=ncols1)
-    c = ws1.cell(r, 1)
-    c.font = Font(name="Calibri", color="90A4AE", size=8, italic=True)
-    c.alignment = _align("left", False)
-    ws1.row_dimensions[r].height = 14
+    brand_footer(ws1, ncols1, footer_txt)
 
     ws1.page_setup.orientation = "portrait"
     ws1.page_setup.paperSize = 9
     ws1.page_setup.fitToPage = True
     ws1.page_setup.fitToWidth = 1
     ws1.page_setup.fitToHeight = 0
-    ws1.print_title_rows = "1:4"
+    ws1.print_title_rows = f"1:{header_row}"
     ws1.page_margins = PageMargins(left=0.5, right=0.5, top=0.75, bottom=0.75)
+    apply_print_brand(ws1, co, license_code)
 
     # HOJA 2: REPORTE ORDENADO
     ws2 = wb.create_sheet("Reporte Ordenado")
@@ -215,7 +260,8 @@ def build_excel(
     ws2.column_dimensions["B"].width = 38
     ws2.column_dimensions["C"].width = 10
 
-    banner(ws2, 3, "FulfillPro - Reporte Ordenado", P["VC"], 13, 26)
+    banner(ws2, 3, f"FulfillPro · {co} — Reporte Ordenado", P["VC"], 13, 26)
+    company_strip(ws2, 3, co, company_code, license_code)
     subtitle(ws2, 3, f"{len(reporte)} lineas | Fecha: {today_str}")
     spacer(ws2, 3)
 
@@ -226,7 +272,7 @@ def build_excel(
     hdr(ws2.cell(r, 1), P["GH"])
     hdr(ws2.cell(r, 2), P["GH"], "left")
     hdr(ws2.cell(r, 3), P["GH"])
-    ws2.freeze_panes = "A5"
+    ws2.freeze_panes = f"A{r + 1}"
 
     prev = ""
     for i, row in enumerate(reporte):
@@ -239,6 +285,9 @@ def build_excel(
         sty(ws2.cell(r, 3), bg, "1565C8", 11, True, "center", False)
         prev = row["PRODUCTO"]
 
+    brand_footer(ws2, 3, footer_txt)
+    apply_print_brand(ws2, co, license_code)
+
     # HOJA 3: PRIORITARIAS
     ws3 = wb.create_sheet("PRIORITARIAS")
     ws3.sheet_properties.tabColor = P["RH"]
@@ -246,18 +295,21 @@ def build_excel(
     for i, w in enumerate([18, 34, 12, 13, 13, 18, 13], 1):
         ws3.column_dimensions[get_column_letter(i)].width = w
 
-    banner(ws3, 7, "FulfillPro - Ordenes Prioritarias", P["RH"], 13, 28)
+    banner(ws3, 7, f"FulfillPro · {co} — Órdenes Prioritarias", P["RH"], 13, 28)
+    company_strip(ws3, 7, co, company_code, license_code)
     subtitle(ws3, 7, f"{len(prior)} ordenes atrasadas - Riesgo: ${total_riesgo:,.0f} | Fecha: {today_str}")
     subtitle(ws3, 7, "Rojo intenso = 5+ dias | Rojo suave = 2-4 dias | Naranja = 1 dia")
 
     ws3.sheet_format.defaultRowHeight = 24
     ws3.append(["N GUIA", "PRODUCTO", "VALOR", "FECHA GUIA", "DIAS RETRASO", "ESTADO", "RIESGO 20%"])
     r = ws3.max_row
+    prior_header = r
+    prior_data_start = r + 1
     ws3.row_dimensions[r].height = 26
     for ci in range(1, 8):
         hdr(ws3.cell(r, ci), P["RH"])
     hdr(ws3.cell(r, 2), P["RH"], "left")
-    ws3.freeze_panes = "A5"
+    ws3.freeze_panes = f"A{prior_data_start}"
 
     if not prior:
         ws3.append(["Sin órdenes atrasadas para la fecha de hoy.", "", "", "", "", "", ""])
@@ -305,8 +357,8 @@ def build_excel(
             c.fill = _fill(P["GH"])
             c.border = Border(top=_SM, bottom=_SM)
         ws3.row_dimensions[sep].height = 4
-        lp = 4 + len(prior)
-        ws3.append(["", "", "", "", "", "TOTAL RIESGO:", f"=SUM(G5:G{lp})"])
+        lp = prior_data_start + len(prior) - 1
+        ws3.append(["", "", "", "", "", "TOTAL RIESGO:", f"=SUM(G{prior_data_start}:G{lp})"])
         r = ws3.max_row
         ws3.row_dimensions[r].height = 26
         for ci in range(1, 6):
@@ -317,6 +369,15 @@ def build_excel(
         c = ws3.cell(r, 7)
         hdr(c, P["RH"], "right")
         c.number_format = "$#,##0"
+
+    brand_footer(ws3, 7, footer_txt)
+    apply_print_brand(ws3, co, license_code)
+
+    # Propiedades del libro con marca de empresa
+    wb.properties.title = f"FulfillPro — {co}"
+    wb.properties.subject = f"Licencia {license_code} · {company_code}"
+    wb.properties.creator = f"FulfillPro ({co})"
+    wb.properties.keywords = f"fulfillpro,{company_code},{license_code}"
 
     buf = io.BytesIO()
     wb.save(buf)

@@ -3,180 +3,183 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>FulfillPro · Admin</title>
+  <title>FulfillPro · Panel plataforma</title>
   <link rel="stylesheet" href="/css/app.css" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Outfit:wght@600;700&display=swap" rel="stylesheet" />
 </head>
 <body>
-  <header class="app-header">
-    <div class="brand">
-      <img src="/assets/logo-placeholder.svg" alt="FulfillPro" />
-      <span class="tag">Administración</span>
-    </div>
-    <div class="nav-actions">
-      <a class="btn btn-sm btn-ghost" href="/">Volver al panel</a>
-      <span id="user-label" class="muted"></span>
-      <button id="btn-logout" class="btn btn-sm btn-ghost" type="button">Salir</button>
-    </div>
-  </header>
-
-  <main class="container">
-    <div id="admin-alert" class="hidden"></div>
-
-    <div class="tabs">
-      <button class="tab active" data-tab="overview" type="button">Monitoreo</button>
-      <button class="tab" data-tab="licenses" type="button">Licencias</button>
-      <button class="tab" data-tab="users" type="button">Usuarios</button>
-      <button class="tab" data-tab="logs" type="button">Logs</button>
-      <button class="tab" data-tab="incidents" type="button">Incidentes</button>
-    </div>
-
-    <section data-panel="overview" class="card">
-      <h1>Monitoreo de plataforma</h1>
-      <p class="lead">Vista operativa y de seguridad: uso, fallos e incidentes abiertos.</p>
-      <div id="overview"></div>
-    </section>
-
-    <section data-panel="licenses" class="hidden">
-      <div class="card">
-        <h1>Crear licencia</h1>
-        <p class="lead">Tras cerrar un trato, genera la licencia y asígnala a la empresa. Ejemplo trial: 50 órdenes, 3/día, 7 días, 3 equipos (cupo global, no por dispositivo).</p>
-        <form id="form-license">
-          <div class="grid-2">
-            <div class="field">
-              <label for="template">Plantilla</label>
-              <select id="template">
-                <option value="trial">Prueba gratuita</option>
-                <option value="standard">Standard</option>
-                <option value="pro">Pro</option>
-                <option value="enterprise">Enterprise</option>
-                <option value="custom">Personalizada</option>
-              </select>
-              <div id="template-hint" class="hint">50 órdenes globales · 3/día · 7 días · 3 equipos</div>
-            </div>
-            <div class="field">
-              <label for="lic-code">Código (opcional, se genera si vacío)</label>
-              <input id="lic-code" class="mono" placeholder="FP-XXXX-XXXX" />
-            </div>
-            <div class="field">
-              <label for="lic-label">Etiqueta</label>
-              <input id="lic-label" placeholder="Cliente ACME — Plan Pro" />
-            </div>
-            <div class="field">
-              <label for="lic-company">Empresa</label>
-              <input id="lic-company" placeholder="ACME S.A.S." />
-            </div>
-            <div class="field">
-              <label for="lic-devices">Máx. equipos (override plantilla)</label>
-              <input id="lic-devices" type="number" min="1" placeholder="dejar vacío = plantilla" />
-            </div>
-            <div class="field">
-              <label for="lic-limit">Límite global de órdenes</label>
-              <input id="lic-limit" type="number" min="0" placeholder="0 = ilimitado / plantilla" />
-            </div>
-            <div class="field">
-              <label for="lic-daily">Límite diario</label>
-              <input id="lic-daily" type="number" min="0" placeholder="0 = sin tope diario" />
-            </div>
-            <div class="field">
-              <label for="lic-days">Duración (días)</label>
-              <input id="lic-days" type="number" min="1" placeholder="plantilla" />
-            </div>
-          </div>
-          <div class="field">
-            <label>
-              <input id="lic-count-global" type="checkbox" checked style="width:auto;margin-right:0.4rem" />
-              Contar órdenes en cupo global
-            </label>
-          </div>
-          <div class="field">
-            <label>
-              <input id="lic-enforce-daily" type="checkbox" checked style="width:auto;margin-right:0.4rem" />
-              Aplicar límite diario
-            </label>
-          </div>
-          <div class="field">
-            <label for="lic-notes">Notas internas</label>
-            <textarea id="lic-notes" rows="2" placeholder="Contrato #…, vendedor, etc."></textarea>
-          </div>
-          <button class="btn btn-primary" type="submit">Crear licencia</button>
-        </form>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <img src="/assets/logo-placeholder.svg" alt="FulfillPro" />
+        <div>
+          <strong>Ops</strong>
+          <span>Plataforma</span>
+        </div>
       </div>
-
-      <div class="card">
-        <h2>Licencias existentes</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Código</th>
-              <th>Label</th>
-              <th>Empresa</th>
-              <th>Uso</th>
-              <th>Equipos</th>
-              <th>Vence</th>
-              <th>Estado</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="licenses-body"></tbody>
-        </table>
+      <nav class="sidebar-nav">
+        <button class="tab nav-item active" data-tab="overview" type="button"><span class="ico">◈</span> Monitoreo</button>
+        <button class="tab nav-item" data-tab="licenses" type="button"><span class="ico">▣</span> Licencias</button>
+        <button class="tab nav-item" data-tab="users" type="button"><span class="ico">◎</span> Usuarios</button>
+        <button class="tab nav-item" data-tab="logs" type="button"><span class="ico">☰</span> Logs</button>
+        <button class="tab nav-item" data-tab="incidents" type="button"><span class="ico">!</span> Incidentes</button>
+      </nav>
+      <div class="sidebar-foot">
+        <div class="user-chip">
+          <strong id="user-label">—</strong>
+          <span>Administrador plataforma</span>
+        </div>
+        <button id="btn-logout" class="btn btn-sidebar btn-sm" type="button">Salir</button>
       </div>
-    </section>
+    </aside>
 
-    <section data-panel="users" class="card hidden">
-      <h1>Usuarios</h1>
-      <table>
-        <thead>
-          <tr>
-            <th>Email</th>
-            <th>Nombre</th>
-            <th>Rol</th>
-            <th>Cliente</th>
-            <th>Empresa</th>
-            <th>Estado</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody id="users-body"></tbody>
-      </table>
-      <p class="hint">Para crear usuarios usa <code>POST /api/auth/users</code> (admin) o la API docs en /api/docs.</p>
-    </section>
+    <div class="main">
+      <header class="topbar">
+        <div>
+          <h1>Panel de plataforma</h1>
+          <p class="sub">Gestión de licencias, empresas e incidentes</p>
+        </div>
+      </header>
+      <div class="content admin-wrap">
+        <div id="admin-alert" class="hidden"></div>
 
-    <section data-panel="logs" class="card hidden">
-      <h1>Logs operativos</h1>
-      <table>
-        <thead>
-          <tr>
-            <th>Fecha</th>
-            <th>Tipo</th>
-            <th>Licencia</th>
-            <th>Detalle</th>
-            <th>Equipo</th>
-            <th>IP</th>
-          </tr>
-        </thead>
-        <tbody id="logs-body"></tbody>
-      </table>
-    </section>
+        <section data-panel="overview" class="card">
+          <h2>Monitoreo</h2>
+          <p class="lead">Vista operativa y de seguridad de toda la plataforma.</p>
+          <div id="overview"></div>
+        </section>
 
-    <section data-panel="incidents" class="card hidden">
-      <h1>Incidentes de seguridad y operación</h1>
-      <p class="lead">Logins fallidos, cupos superados, errores de proceso, etc.</p>
-      <table>
-        <thead>
-          <tr>
-            <th>Severidad</th>
-            <th>Categoría</th>
-            <th>Evento</th>
-            <th>Licencia</th>
-            <th>IP</th>
-            <th>Acción</th>
-          </tr>
-        </thead>
-        <tbody id="incidents-body"></tbody>
-      </table>
-    </section>
-  </main>
+        <section data-panel="licenses" class="hidden">
+          <div class="card">
+            <h2>Crear licencia</h2>
+            <p class="lead">Al cerrar un trato, genera la licencia y entrégala a la empresa. Los empleados firman términos en el primer login.</p>
+            <form id="form-license">
+              <div class="grid-2">
+                <div class="field">
+                  <label for="template">Plantilla</label>
+                  <select id="template">
+                    <option value="trial">Prueba gratuita</option>
+                    <option value="standard">Standard</option>
+                    <option value="pro">Pro</option>
+                    <option value="enterprise">Enterprise</option>
+                    <option value="custom">Personalizada</option>
+                  </select>
+                  <div id="template-hint" class="hint">50 órdenes · 3/día · 7 días</div>
+                </div>
+                <div class="field">
+                  <label for="lic-code">Código (opcional)</label>
+                  <input id="lic-code" class="mono" placeholder="FP-XXXX-XXXX" />
+                </div>
+                <div class="field">
+                  <label for="lic-label">Etiqueta</label>
+                  <input id="lic-label" placeholder="Cliente ACME — Plan Pro" />
+                </div>
+                <div class="field">
+                  <label for="lic-company">Empresa</label>
+                  <input id="lic-company" placeholder="ACME S.A.S." />
+                </div>
+                <div class="field">
+                  <label for="lic-limit">Límite global de órdenes</label>
+                  <input id="lic-limit" type="number" min="0" placeholder="plantilla" />
+                </div>
+                <div class="field">
+                  <label for="lic-daily">Límite diario</label>
+                  <input id="lic-daily" type="number" min="0" placeholder="plantilla" />
+                </div>
+                <div class="field">
+                  <label for="lic-days">Duración (días)</label>
+                  <input id="lic-days" type="number" min="1" placeholder="plantilla" />
+                </div>
+                <div class="field">
+                  <label for="lic-devices">Máx. equipos (legacy)</label>
+                  <input id="lic-devices" type="number" min="1" value="99" />
+                </div>
+              </div>
+              <div class="field">
+                <label><input id="lic-count-global" type="checkbox" checked style="width:auto;margin-right:0.4rem" /> Contar en cupo global</label>
+              </div>
+              <div class="field">
+                <label><input id="lic-enforce-daily" type="checkbox" checked style="width:auto;margin-right:0.4rem" /> Aplicar límite diario</label>
+              </div>
+              <div class="field">
+                <label for="lic-notes">Notas</label>
+                <textarea id="lic-notes" rows="2"></textarea>
+              </div>
+              <button class="btn btn-primary" type="submit">Crear licencia</button>
+            </form>
+          </div>
+          <div class="card">
+            <h2>Licencias</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Código</th>
+                  <th>Label</th>
+                  <th>Empresa</th>
+                  <th>Uso</th>
+                  <th>Vence</th>
+                  <th>Estado</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="licenses-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section data-panel="users" class="card hidden">
+          <h2>Usuarios</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Nombre</th>
+                <th>Rol</th>
+                <th>Cliente</th>
+                <th>Empresa</th>
+                <th>Estado</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="users-body"></tbody>
+          </table>
+        </section>
+
+        <section data-panel="logs" class="card hidden">
+          <h2>Logs operativos</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Tipo</th>
+                <th>Licencia</th>
+                <th>Detalle</th>
+                <th>IP</th>
+              </tr>
+            </thead>
+            <tbody id="logs-body"></tbody>
+          </table>
+        </section>
+
+        <section data-panel="incidents" class="card hidden">
+          <h2>Incidentes</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Severidad</th>
+                <th>Categoría</th>
+                <th>Evento</th>
+                <th>Licencia</th>
+                <th>IP</th>
+                <th>Acción</th>
+              </tr>
+            </thead>
+            <tbody id="incidents-body"></tbody>
+          </table>
+        </section>
+      </div>
+    </div>
+  </div>
 
   <script src="/js/api.js"></script>
   <script src="/js/auth.js"></script>

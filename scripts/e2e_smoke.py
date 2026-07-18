@@ -23,42 +23,42 @@ def get_json(path, token):
 
 
 def main():
+    # Portal empresas (no platform admin)
     login = post_json(
         "/api/auth/login",
-        {"email": "admin@fulfillpro.com", "password": "AdminFulfillPro2026!"},
+        {"email": "empresa@demo.com", "password": "DemoEmpresa2026!"},
     )
     token = login["access_token"]
-    print("login ok")
+    print("login company ok", "needs_consent", login.get("needs_consent"))
 
-    act = post_json(
-        "/api/licenses/activate",
-        {
-            "code": "DEMO-TRIAL",
-            "device_id": "PC-TEST-001",
-            "device_name": "Dev Laptop",
-            "device_soft": "soft1",
-        },
-        token,
-    )
-    print(
-        "activate",
-        act["device_status"],
-        "uses",
-        act["license"]["uses"],
-        "devices",
-        act["license"]["devices_count"],
-    )
+    # Firmar términos si aplica
+    import urllib.error
+
+    req = request.Request(base + "/api/legal/pending")
+    req.add_header("Authorization", f"Bearer {token}")
+    with request.urlopen(req) as r:
+        pending = json.loads(r.read().decode())
+    if pending.get("required") and pending.get("document"):
+        post_json(
+            "/api/legal/sign",
+            {
+                "document_id": pending["document"]["id"],
+                "signature_name": "Admin Empresa Demo",
+                "accepted": True,
+            },
+            token,
+        )
+        print("legal signed")
+
+    dash = get_json("/api/licenses/dashboard", token)
+    print("dashboard ok", dash.get("ok"), "uses", (dash.get("license") or {}).get("uses"))
 
     boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW"
     sample = Path("/app/samples/ordenes_muestra.xlsx")
     if not sample.exists():
         sample = Path("samples/ordenes_muestra.xlsx")
     file_data = sample.read_bytes()
-    fields = {
-        "license_code": "DEMO-TRIAL",
-        "device_id": "PC-TEST-001",
-        "device_soft": "soft1",
-    }
+    fields = {}
     body = b""
     for k, v in fields.items():
         body += (
@@ -87,12 +87,18 @@ def main():
 
     orders = get_json("/api/orders", token)
     print("orders", orders["total"], orders["items"][0]["status"] if orders["items"] else None)
-    mon = get_json("/api/admin/monitoring/overview", token)
+
+    # Platform admin (login oculto)
+    plat = post_json(
+        "/api/auth/login/platform",
+        {"email": "admin@fulfillpro.com", "password": "AdminFulfillPro2026!"},
+    )
+    mon = get_json("/api/admin/monitoring/overview", plat["access_token"])
     print(
-        "mon",
+        "platform mon",
         {
             k: mon[k]
-            for k in ["total_users", "active_licenses", "orders_today", "active_devices"]
+            for k in ["total_users", "active_licenses", "orders_today"]
         },
     )
     print("OK")

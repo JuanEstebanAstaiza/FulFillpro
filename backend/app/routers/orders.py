@@ -18,42 +18,30 @@ router = APIRouter(prefix="/api/orders", tags=["orders"])
 async def upload_order(
     request: Request,
     file: UploadFile = File(...),
-    license_code: str = Form(...),
-    device_id: str = Form(...),
-    device_soft: str = Form(""),
+    license_code: Optional[str] = Form(None),
     count_quota: str = Form("true"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """
-    count_quota=false permite subida independiente sin descontar el cupo global
-    (si la licencia o el admin lo permiten; el flag se respeta si la licencia
-    tiene independent_upload o count_toward_global=false).
-    """
     content = await file.read()
     ip = request.client.host if request.client else ""
     count = str(count_quota).lower() not in {"false", "0", "no", "off"}
-    order = order_service.create_order_from_upload(
+    return order_service.create_order_from_upload(
         db,
         user=user,
         file=file,
         content=content,
-        license_code=license_code,
-        device_id=device_id,
-        device_soft=device_soft,
+        license_code=license_code or None,
         count_quota=count,
         ip=ip,
     )
-    return order
 
 
 @router.post("/{order_id}/process", response_model=OrderOut)
 def process(
     order_id: UUID,
     request: Request,
-    license_code: str = Form(...),
-    device_id: str = Form(...),
-    device_soft: str = Form(""),
+    license_code: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -63,9 +51,7 @@ def process(
         db,
         user=user,
         order=order,
-        license_code=license_code,
-        device_id=device_id,
-        device_soft=device_soft,
+        license_code=license_code or None,
         ip=ip,
     )
 

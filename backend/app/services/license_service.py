@@ -495,10 +495,130 @@ def release_device(db: Session, lic: License, device_id: Optional[str] = None) -
 
 
 def get_user_license(db: Session, user: User) -> Optional[License]:
-    return (
+    """
+    Licencia efectiva del usuario por empresa:
+    1) Licencia de la que es dueño
+    2) Licencia activa de otro usuario con el mismo client_code (misma empresa)
+    """
+    owned = (
         db.query(License)
         .options(joinedload(License.devices))
         .filter(License.owner_user_id == user.id, License.active.is_(True))
         .order_by(License.created_at.desc())
         .first()
     )
+    if owned:
+        return owned
+
+    if user.client_code:
+        peer_ids = [
+            r[0]
+            for r in db.query(User.id)
+            .filter(User.client_code == user.client_code, User.is_active.is_(True))
+            .all()
+        ]
+        if peer_ids:
+            shared = (
+                db.query(License)
+                .options(joinedload(License.devices))
+                .filter(
+                    License.owner_user_id.in_(peer_ids),
+                    License.active.is_(True),
+                )
+                .order_by(License.created_at.desc())
+                .first()
+            )
+            if shared:
+                return shared
+    return None
+
+
+def assert_user_license(db: Session, user: User, license_code: Optional[str] = None) -> License:
+    """Autoriza por cuenta de empresa (sin registro de equipos)."""
+    lic: Optional[License] = None
+    if license_code:
+        code = license_code.upper().strip()
+        lic = (
+            db.query(License)
+            .options(joinedload(License.devices))
+            .filter(License.code == code)
+            .first()
+        )
+        if not lic:
+            raise HTTPException(403, "Licencia no válida.")
+        # Solo la empresa dueña o admin
+        if user.role != "admin":
+            if lic.owner_user_id == user.id:
+                pass
+            elif user.client_code and lic.owner_user_id:
+                owner = db.query(User).filter(User.id == lic.owner_user_id).first()
+                if not owner or owner.client_code != user.client_code:
+                    raise HTTPException(
+                        403,
+                        "Esta licencia pertenece a otra empresa. "
+                        "No puedes usarla con tu cuenta.",
+                    )
+            elif lic.owner_user_id and lic.owner_user_id != user.id:
+                raise HTTPException(403, "Licencia no asignada a tu empresa.")
+    else:
+        lic = get_user_license(db, user)
+        if not lic:
+            raise HTTPException(
+                403,
+                "Tu cuenta no tiene licencia activa. Contacta al administrador de tu empresa.",
+            )
+
+    check_license_quotas(db, lic)
+    lic.last_access = datetime.utcnow()
+    db.commit()
+    return lic
+
+
+def company_brand(lic: License, user: User) -> dict[str, str]:
+    """Datos de distintivo corporativo para Excel y UI."""
+    company = (lic.company_name or user.company_name or user.client_code or "Cliente").strip()
+    code = (user.client_code or lic.code or "").strip()
+    return {
+        "company_name": company,
+        "company_code": code,
+        "license_code": lic.code,
+        "brand_line": f"Documento exclusivo · {company} · Lic. {lic.code}",
+        "footer_line": (
+            f"Generado con FulfillPro para uso exclusivo de {company} "
+            f"({code}) · Licencia {lic.code} · Prohibida su reventa o uso por terceros"
+        ),
+    }
+
+
+def usage_summary(db: Session, lic: License) -> dict:
+    """Resumen para dashboard: % uso, alertas, días restantes."""
+    data = license_to_dict(db, lic, include_devices=False)
+    limit = lic.limit_uses or 0
+    uses = lic.uses or 0
+    daily = lic.daily_limit or 0
+    today = data["uses_today"]
+    pct_global = round((uses / limit) * 100, 1) if limit > 0 else 0.0
+    pct_daily = round((today / daily) * 100, 1) if daily > 0 else 0.0
+    remaining = max(limit - uses, 0) if limit > 0 else None
+    days = data["days_left"]
+
+    warnings: list[str] = []
+    if limit > 0 and pct_global >= 90:
+        warnings.append(f"Quedan pocos usos del plan ({remaining} de {limit}).")
+    elif limit > 0 and pct_global >= 75:
+        warnings.append(f"Has usado el {pct_global}% del cupo global.")
+    if daily > 0 and pct_daily >= 90:
+        warnings.append(f"Casi alcanzas el límite diario ({today}/{daily}).")
+    if days is not None and days <= 3:
+        warnings.append(f"La licencia vence en {days} día(s).")
+    if days is not None and days < 0:
+        warnings.append("La licencia está vencida.")
+
+    return {
+        **data,
+        "usage_percent": pct_global,
+        "daily_percent": pct_daily,
+        "remaining_uses": remaining,
+        "warnings": warnings,
+        "near_limit": bool(warnings),
+    }

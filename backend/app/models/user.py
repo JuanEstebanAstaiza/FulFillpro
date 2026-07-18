@@ -44,12 +44,17 @@ class User(Base):
     email = Column(String(255), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
     full_name = Column(String(255), default="")
-    role = Column(String(32), default="client", nullable=False)  # admin | client
+    # admin = platform_admin (FulfillPro) | company_admin | employee | client (legacy→employee)
+    role = Column(String(32), default="employee", nullable=False)
     client_code = Column(String(64), default="", index=True)
     company_name = Column(String(255), default="")
     is_active = Column(Boolean, default=True)
+    # Empleados deben firmar el documento legal vigente antes de usar la app
+    must_accept_terms = Column(Boolean, default=True)
+    terms_accepted_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login = Column(DateTime, nullable=True)
+    created_by_id = Column(GUID(), nullable=True)  # quién creó al usuario (company_admin)
 
     licenses = relationship("License", back_populates="owner", foreign_keys="License.owner_user_id")
     orders = relationship("Order", back_populates="user")

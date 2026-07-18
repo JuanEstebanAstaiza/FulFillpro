@@ -19,19 +19,22 @@ cp .env.example .env
 docker compose up --build
 ```
 
-- App: http://localhost:8000  
-- Admin UI: http://localhost:8000/admin  
+- App empresas: http://localhost:8000  
+- **Ops (login oculto plataforma):** http://localhost:8000/ops  
 - API docs: http://localhost:8000/api/docs  
 
-**Credenciales por defecto** (cámbialas en `.env`):
+**Portal empresas (demo):**
+
+- Email: `empresa@demo.com`
+- Password: `DemoEmpresa2026!`
+- Licencia: `DEMO-TRIAL`
+
+**Plataforma FulfillPro (ruta oculta `/ops`):**
 
 - Email: `admin@fulfillpro.com`
-- Password: `AdminFulfillPro2026!`
+- Password: `AdminFulfillPro2026!` (cámbiala en `.env`)
 
-Licencias demo sembradas:
-
-- `DEMO-TRIAL` — plantilla trial (50 órdenes, 3/día, 7 días, 3 equipos)
-- `DEMO-001` — plan estándar demo
+En el **primer login**, company_admin y empleados deben **firmar digitalmente** los términos legales.
 
 ## Desarrollo local (sin Docker de la API)
 
@@ -75,8 +78,8 @@ Desde el panel admin puedes crear licencias al cerrar un trato, asignarlas a usu
 
 ## Flujo de uso
 
-1. Login (JWT)
-2. Activar licencia + ID de equipo
+1. **Login** con email o **registro** con email + código de licencia de la empresa (sin activar PCs)
+2. En el panel lateral: **Inicio** (estadísticas), **Cargar orden**, **Histórico**
 3. Subir Excel → se crea una **orden** en PostgreSQL y se guarda en:
 
 ```
@@ -87,8 +90,10 @@ storage/{client_code}/{YYYY}/{MM}/{order_id}/
   meta.json
 ```
 
-4. Procesar → Excel de 3 hojas enlazado a la orden
-5. Descargar desde historial cuando quieras
+4. Procesar → Excel de 3 hojas **con distintivo de la empresa** (franja “LICENCIADO PARA…”, pie y metadatos)
+5. Descargar desde **Histórico** cuando quieras
+
+Los empleados de la misma empresa comparten la licencia vía el mismo `client_code` / código de licencia. No pueden usar licencias de otras empresas.
 
 ## Columnas del Excel de entrada
 

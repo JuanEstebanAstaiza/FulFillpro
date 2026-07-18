@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
+from typing import Optional
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -16,14 +18,12 @@ router = APIRouter(prefix="/api", tags=["process"])
 async def process_one_shot(
     request: Request,
     file: UploadFile = File(...),
-    license_code: str = Form(...),
-    device_id: str = Form(...),
-    device_soft: str = Form(""),
+    license_code: Optional[str] = Form(None),
     count_quota: str = Form("true"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Atajo: sube + procesa y devuelve el Excel de salida (como v1)."""
+    """Sube + procesa usando la licencia de la empresa del usuario (sin activar equipos)."""
     settings = get_settings()
     rate_limit_from_request(request, "process", settings.rate_limit_process, 60)
     content = await file.read()
@@ -35,9 +35,7 @@ async def process_one_shot(
         user=user,
         file=file,
         content=content,
-        license_code=license_code,
-        device_id=device_id,
-        device_soft=device_soft,
+        license_code=license_code or None,
         count_quota=count,
         ip=ip,
     )
@@ -45,15 +43,11 @@ async def process_one_shot(
         db,
         user=user,
         order=order,
-        license_code=license_code,
-        device_id=device_id,
-        device_soft=device_soft,
+        license_code=license_code or None,
         ip=ip,
     )
     out = next((f for f in order.files if f.kind == "output"), None)
     if not out:
-        from fastapi import HTTPException
-
         raise HTTPException(500, "No se generó el archivo de salida.")
     path = storage_service.absolute_from_relative(out.relative_path)
     return FileResponse(

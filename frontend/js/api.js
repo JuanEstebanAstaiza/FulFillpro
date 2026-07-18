@@ -10,32 +10,6 @@ const API = {
     localStorage.removeItem("fp_access");
     localStorage.removeItem("fp_refresh");
   },
-  get deviceId() {
-    let id = localStorage.getItem("fp_device_id");
-    if (!id) {
-      id = "PC-" + Math.random().toString(36).slice(2, 8).toUpperCase() + "-" + Date.now().toString(36).toUpperCase();
-      localStorage.setItem("fp_device_id", id);
-    }
-    return id;
-  },
-  setDeviceId(id) {
-    localStorage.setItem("fp_device_id", (id || "").trim().toUpperCase());
-  },
-  get deviceSoft() {
-    let s = localStorage.getItem("fp_device_soft");
-    if (!s) {
-      const raw = [navigator.platform, navigator.language, screen.width, screen.height, navigator.hardwareConcurrency || 0].join("|");
-      s = btoa(unescape(encodeURIComponent(raw))).slice(0, 48);
-      localStorage.setItem("fp_device_soft", s);
-    }
-    return s;
-  },
-  get licenseCode() {
-    return localStorage.getItem("fp_license") || "";
-  },
-  setLicenseCode(code) {
-    localStorage.setItem("fp_license", (code || "").trim().toUpperCase());
-  },
 
   async request(path, options = {}) {
     const headers = Object.assign({}, options.headers || {});
@@ -100,6 +74,18 @@ const API = {
       body: JSON.stringify({ email, password }),
     });
   },
+  loginPlatform(email, password) {
+    return this.request("/api/auth/login/platform", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    });
+  },
+  register(payload) {
+    return this.request("/api/auth/register", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
   me() {
     return this.request("/api/auth/me");
   },
@@ -109,26 +95,36 @@ const API = {
       body: JSON.stringify({ refresh_token: localStorage.getItem("fp_refresh") || "" }),
     }).finally(() => this.clearTokens());
   },
-  activateLicense(payload) {
-    return this.request("/api/licenses/activate", {
+  dashboard() {
+    return this.request("/api/licenses/dashboard");
+  },
+  listOrders(page = 1) {
+    return this.request(`/api/orders?page=${page}&page_size=30`);
+  },
+  async processFile(file) {
+    const fd = new FormData();
+    fd.append("file", file);
+    return this.request("/api/process", { method: "POST", body: fd });
+  },
+  legalPending() {
+    return this.request("/api/legal/pending");
+  },
+  legalSign(payload) {
+    return this.request("/api/legal/sign", {
       method: "POST",
       body: JSON.stringify(payload),
     });
   },
-  licenseStatus() {
-    return this.request("/api/licenses/status");
+  companyEmployees() {
+    return this.request("/api/company/employees");
   },
-  listOrders(page = 1) {
-    return this.request(`/api/orders?page=${page}&page_size=20`);
+  createEmployee(payload) {
+    return this.request("/api/company/employees", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
   },
-  async processFile(file, countQuota = true) {
-    const fd = new FormData();
-    fd.append("file", file);
-    fd.append("license_code", this.licenseCode);
-    fd.append("device_id", this.deviceId);
-    fd.append("device_soft", this.deviceSoft);
-    fd.append("count_quota", countQuota ? "true" : "false");
-    const res = await this.request("/api/process", { method: "POST", body: fd });
-    return res; // FileResponse
+  toggleEmployee(id) {
+    return this.request(`/api/company/employees/${id}/toggle`, { method: "POST" });
   },
 };
