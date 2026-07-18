@@ -1,0 +1,240 @@
+from __future__ import annotations
+
+from datetime import date, datetime
+from typing import Optional
+from uuid import UUID
+
+from fastapi import HTTPException, UploadFile
+from sqlalchemy.orm import Session, joinedload
+
+from backend.app.models.license import License
+from backend.app.models.order import Order, OrderFile
+from backend.app.models.user import User
+from backend.app.services import storage_service
+from backend.app.services.audit_service import log_access, log_security
+from backend.app.services.excel import build_excel, process_rows, read_excel_rows
+from backend.app.services.license_service import assert_device_authorized, check_license_quotas, consume_quota
+
+
+def create_order_from_upload(
+    db: Session,
+    *,
+    user: User,
+    file: UploadFile,
+    content: bytes,
+    license_code: str,
+    device_id: str,
+    device_soft: str = "",
+    count_quota: bool = True,
+    ip: str = "",
+) -> Order:
+    lic = assert_device_authorized(
+        db,
+        user=user,
+        license_code=license_code,
+        device_id=device_id,
+        device_soft=device_soft,
+    )
+
+    order = Order(
+        user_id=user.id,
+        license_id=lic.id,
+        client_code=user.client_code or user.email.split("@")[0].upper(),
+        status="uploaded",
+        original_filename=file.filename or "upload.xlsx",
+        device_id=device_id,
+        counted_toward_quota=bool(count_quota and lic.count_toward_global),
+    )
+    db.add(order)
+    db.commit()
+    db.refresh(order)
+
+    folder = storage_service.ensure_order_dirs(order.client_code, order.id, order.created_at)
+    order.storage_folder = storage_service.relative_to_storage(folder)
+
+    path, rel, size = storage_service.save_bytes(
+        folder, "input", order.original_filename, content
+    )
+    db.add(
+        OrderFile(
+            order_id=order.id,
+            kind="input",
+            filename=path.name,
+            relative_path=rel,
+            size_bytes=size,
+        )
+    )
+    db.commit()
+    db.refresh(order)
+
+    log_access(
+        db,
+        event_type="upload",
+        detail=f"Subida {order.original_filename} ({size} bytes)",
+        user_id=user.id,
+        license_code=lic.code,
+        label=lic.label,
+        device_id=device_id,
+        ip=ip,
+    )
+    return order
+
+
+def process_order(
+    db: Session,
+    *,
+    user: User,
+    order: Order,
+    license_code: str,
+    device_id: str,
+    device_soft: str = "",
+    ip: str = "",
+) -> Order:
+    if order.user_id != user.id and user.role != "admin":
+        raise HTTPException(403, "No tienes acceso a esta orden.")
+
+    lic = assert_device_authorized(
+        db,
+        user=user,
+        license_code=license_code,
+        device_id=device_id,
+        device_soft=device_soft,
+    )
+    check_license_quotas(db, lic)
+
+    input_file = next((f for f in order.files if f.kind == "input"), None)
+    if not input_file:
+        raise HTTPException(400, "La orden no tiene archivo de entrada.")
+
+    abs_path = storage_service.absolute_from_relative(input_file.relative_path)
+    if not abs_path.exists():
+        raise HTTPException(404, "Archivo de entrada no encontrado en almacenamiento.")
+
+    order.status = "processing"
+    db.commit()
+
+    try:
+        content = abs_path.read_bytes()
+        rows = read_excel_rows(content)
+        if not rows:
+            raise ValueError("El archivo no tiene datos.")
+
+        today = date.today()
+        resumen_final, cant_max, reporte, prior, total_riesgo = process_rows(rows, today)
+        cant_cols = [f"Cantidad {c}" for c in range(1, cant_max + 1)]
+        output = build_excel(resumen_final, cant_cols, cant_max, reporte, prior, total_riesgo, today)
+
+        folder = storage_service.ensure_order_dirs(order.client_code, order.id, order.created_at)
+        out_name = f"FulfillPro_Resultado_{today.isoformat()}.xlsx"
+        path, rel, size = storage_service.save_bytes(folder, "output", out_name, output)
+
+        # Evitar duplicar outputs previos
+        for f in list(order.files):
+            if f.kind == "output":
+                db.delete(f)
+
+        db.add(
+            OrderFile(
+                order_id=order.id,
+                kind="output",
+                filename=path.name,
+                relative_path=rel,
+                size_bytes=size,
+            )
+        )
+
+        total_uds = sum(
+            int(row.get(c, 0) or 0)
+            for row in resumen_final
+            for c in cant_cols
+            if row.get(c, "") != ""
+        )
+        n_combos = sum(1 for r in resumen_final if str(r.get("VARIABLES", "")).upper() == "COMBO")
+        meta = {
+            "productos": len(resumen_final),
+            "unidades": total_uds,
+            "combos": n_combos,
+            "lineas": len(rows),
+            "prioritarias": len(prior),
+            "total_riesgo": total_riesgo,
+        }
+        storage_service.write_meta(folder, meta)
+
+        order.row_count = len(rows)
+        order.priority_count = len(prior)
+        order.total_risk = float(total_riesgo)
+        order.meta = meta
+        order.status = "completed"
+        order.processed_at = datetime.utcnow()
+        order.error_message = ""
+
+        counted = consume_quota(db, lic, count=order.counted_toward_quota)
+        order.counted_toward_quota = counted
+        db.commit()
+        db.refresh(order)
+
+        log_access(
+            db,
+            event_type="process",
+            detail=f"{len(rows)} filas, {len(prior)} prioritarias",
+            user_id=user.id,
+            license_code=lic.code,
+            label=lic.label,
+            device_id=device_id,
+            ip=ip,
+        )
+        return order
+
+    except Exception as e:
+        order.status = "failed"
+        order.error_message = str(e)
+        db.commit()
+        log_security(
+            db,
+            title="Error procesando orden",
+            detail=str(e),
+            severity="critical",
+            category="operational",
+            user_id=user.id,
+            license_code=license_code,
+            ip=ip,
+            meta={"order_id": str(order.id)},
+        )
+        raise HTTPException(500, f"Error procesando datos: {e}") from e
+
+
+def list_orders(
+    db: Session,
+    *,
+    user: User,
+    page: int = 1,
+    page_size: int = 20,
+    status: Optional[str] = None,
+) -> tuple[list[Order], int]:
+    q = db.query(Order).options(joinedload(Order.files))
+    if user.role != "admin":
+        q = q.filter(Order.user_id == user.id)
+    if status:
+        q = q.filter(Order.status == status)
+    total = q.count()
+    items = (
+        q.order_by(Order.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return items, total
+
+
+def get_order(db: Session, order_id: UUID, user: User) -> Order:
+    order = (
+        db.query(Order)
+        .options(joinedload(Order.files))
+        .filter(Order.id == order_id)
+        .first()
+    )
+    if not order:
+        raise HTTPException(404, "Orden no encontrada.")
+    if order.user_id != user.id and user.role != "admin":
+        raise HTTPException(403, "Sin acceso a esta orden.")
+    return order
