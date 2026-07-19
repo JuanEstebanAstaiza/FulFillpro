@@ -10,7 +10,9 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from backend.app.config import get_settings
+from backend.app.core.middleware import SecurityHeadersMiddleware
 from backend.app.core.security import hash_password
+from backend.app.core.security_hardening import assert_production_secrets
 from backend.app.database import Base, SessionLocal, engine
 from backend.app.models import *  # noqa: F401,F403
 from backend.app.models.license import License
@@ -19,21 +21,34 @@ from backend.app.routers import admin, analytics, auth, company, health, legal, 
 from backend.app.services import legal_service, license_service, storage_service
 
 settings = get_settings()
+# OWASP A02/A05: fail-fast en production si secretos/CORS inseguros
+assert_production_secrets(settings)
 
 app = FastAPI(
     title="FulfillPro API",
-    version="2.1.0",
+    version="2.2.0",
     docs_url="/api/docs" if not settings.is_production else None,
     redoc_url=None,
+    openapi_url="/api/openapi.json" if not settings.is_production else None,
 )
+
+# Security headers primero (outermost se añade al final en Starlette — orden invertido)
+# CORS: en production NO se permite '*'
+_cors_origins = settings.cors_origin_list
+_cors_credentials = True
+if settings.is_production and _cors_origins == ["*"]:
+    # defensa extra (assert_production_secrets ya debería haber fallado)
+    _cors_origins = []
+    _cors_credentials = False
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origin_list,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_cors_origins if _cors_origins else ["http://localhost:8000"],
+    allow_credentials=_cors_credentials,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With"],
 )
+app.add_middleware(SecurityHeadersMiddleware)
 
 app.include_router(health.router)
 app.include_router(auth.router)
@@ -104,64 +119,66 @@ def seed_database() -> None:
 
         admin = db.query(User).filter(User.email == settings.admin_email.lower()).first()
 
-        # Empresa demo + company_admin demo (no el platform admin)
-        demo_admin = db.query(User).filter(User.email == "empresa@demo.com").first()
-        if not demo_admin:
-            demo_admin = User(
-                email="empresa@demo.com",
-                password_hash=hash_password("DemoEmpresa2026!"),
-                full_name="Admin Empresa Demo",
-                role="company_admin",
-                client_code="DEMO",
-                company_name="Demo interno",
-                is_active=True,
-                must_accept_terms=True,
-            )
-            db.add(demo_admin)
-            db.commit()
-            db.refresh(demo_admin)
+        # Empresa demo: solo en development y si seed_demo_users=true (OWASP A05)
+        demo_admin = None
+        if settings.seed_demo_users and not settings.is_production:
+            demo_admin = db.query(User).filter(User.email == "empresa@demo.com").first()
+            if not demo_admin:
+                demo_admin = User(
+                    email="empresa@demo.com",
+                    password_hash=hash_password("DemoEmpresa2026!"),
+                    full_name="Admin Empresa Demo",
+                    role="company_admin",
+                    client_code="DEMO",
+                    company_name="Demo interno",
+                    is_active=True,
+                    must_accept_terms=True,
+                )
+                db.add(demo_admin)
+                db.commit()
+                db.refresh(demo_admin)
 
-        if db.query(License).filter(License.code == "DEMO-TRIAL").count() == 0:
-            license_service.create_license(
-                db,
-                {
-                    "code": "DEMO-TRIAL",
-                    "template": "trial",
-                    "label": "Demo prueba gratuita",
-                    "company_name": "Demo interno",
-                    "notes": "Licencia demo.",
-                    "owner_user_id": demo_admin.id if demo_admin else None,
-                },
-            )
+            if db.query(License).filter(License.code == "DEMO-TRIAL").count() == 0:
+                license_service.create_license(
+                    db,
+                    {
+                        "code": "DEMO-TRIAL",
+                        "template": "trial",
+                        "label": "Demo prueba gratuita",
+                        "company_name": "Demo interno",
+                        "notes": "Licencia demo.",
+                        "owner_user_id": demo_admin.id if demo_admin else None,
+                    },
+                )
 
-        if db.query(License).filter(License.code == "DEMO-001").count() == 0:
-            license_service.create_license(
-                db,
-                {
-                    "code": "DEMO-001",
-                    "type": "standard",
-                    "label": "Demo estándar",
-                    "company_name": "Demo interno",
-                    "max_devices": 99,
-                    "limit_uses": 200,
-                    "daily_limit": 20,
-                    "expiry": date.today() + timedelta(days=365),
-                    "owner_user_id": demo_admin.id if demo_admin else None,
-                },
-            )
+            if db.query(License).filter(License.code == "DEMO-001").count() == 0:
+                license_service.create_license(
+                    db,
+                    {
+                        "code": "DEMO-001",
+                        "type": "standard",
+                        "label": "Demo estándar",
+                        "company_name": "Demo interno",
+                        "max_devices": 99,
+                        "limit_uses": 200,
+                        "daily_limit": 20,
+                        "expiry": date.today() + timedelta(days=365),
+                        "owner_user_id": demo_admin.id if demo_admin else None,
+                    },
+                )
 
-        # Siempre reasignar demos a la empresa demo (no al platform admin)
-        if demo_admin:
-            for code in ("DEMO-TRIAL", "DEMO-001"):
-                lic = db.query(License).filter(License.code == code).first()
-                if lic:
-                    lic.owner_user_id = demo_admin.id
-                    lic.company_name = lic.company_name or "Demo interno"
-                    lic.active = True
-            demo_admin.client_code = "DEMO"
-            demo_admin.company_name = demo_admin.company_name or "Demo interno"
-            demo_admin.role = "company_admin"
-            db.commit()
+            if demo_admin:
+                for code in ("DEMO-TRIAL", "DEMO-001"):
+                    lic = db.query(License).filter(License.code == code).first()
+                    if lic:
+                        lic.owner_user_id = demo_admin.id
+                        lic.company_name = lic.company_name or "Demo interno"
+                        lic.active = True
+                demo_admin.client_code = "DEMO"
+                demo_admin.company_name = demo_admin.company_name or "Demo interno"
+                demo_admin.role = "company_admin"
+                db.commit()
+
 
 
 @app.on_event("startup")

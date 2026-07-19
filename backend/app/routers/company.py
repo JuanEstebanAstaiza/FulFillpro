@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.core.security import hash_password
 from backend.app.database import get_db
-from backend.app.dependencies import get_current_user
+from backend.app.dependencies import get_current_user, require_consent
 from backend.app.models.user import User
 from backend.app.schemas.auth import UserOut
 from backend.app.services.audit_service import log_access
@@ -20,7 +20,7 @@ from backend.app.services import license_service
 router = APIRouter(prefix="/api/company", tags=["company"])
 
 
-def require_company_admin(user: User = Depends(get_current_user)) -> User:
+def require_company_admin(user: User = Depends(require_consent)) -> User:
     if user.role not in ("company_admin", "admin"):
         raise HTTPException(403, "Solo el administrador de la empresa puede gestionar usuarios.")
     return user
@@ -28,7 +28,7 @@ def require_company_admin(user: User = Depends(get_current_user)) -> User:
 
 class EmployeeCreate(BaseModel):
     email: str = Field(min_length=3)
-    password: str = Field(min_length=8)
+    password: str = Field(min_length=12)
     full_name: str = ""
 
 

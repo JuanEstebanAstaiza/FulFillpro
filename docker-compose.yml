@@ -1,3 +1,13 @@
+# FulfillPro — stack dimensionado para capacidad auditada:
+#   RAM total del stack: 12 GB
+#   Almacenamiento objetivo del volumen de datos: 100 GB
+#
+# Notas Docker Desktop (Windows/Mac):
+#   - Los límites de memoria se aplican con cgroup (deploy.resources).
+#   - El tope de 100 GB de disco se aplica como política de aplicación
+#     (STORAGE_MAX_GB) + tamaño de volúmenes en el host; Docker no
+#     limita el tamaño de volumen local de forma portable en Desktop.
+
 services:
   db:
     image: postgres:16-alpine
@@ -5,7 +15,22 @@ services:
       POSTGRES_USER: fulfillpro
       POSTGRES_PASSWORD: fulfillpro
       POSTGRES_DB: fulfillpro
-    # Red interna de Docker (sin publicar puertos al host).
+      # Memoria compartida / conexiones acordes a 4 GB
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+    command:
+      - postgres
+      - -c
+      - shared_buffers=1GB
+      - -c
+      - effective_cache_size=3GB
+      - -c
+      - work_mem=16MB
+      - -c
+      - maintenance_work_mem=256MB
+      - -c
+      - max_connections=100
+      - -c
+      - max_wal_size=1GB
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -13,9 +38,20 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 4G
+        reservations:
+          cpus: "0.5"
+          memory: 1G
+    mem_limit: 4g
+    cpus: 2.0
 
   redis:
     image: redis:7-alpine
+    command: ["redis-server", "--maxmemory", "400mb", "--maxmemory-policy", "allkeys-lru"]
     volumes:
       - redisdata:/data
     healthcheck:
@@ -23,7 +59,15 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+        reservations:
+          memory: 128M
+    mem_limit: 512m
+    cpus: 0.5
 
   api:
     build:
@@ -35,9 +79,22 @@ services:
       - .env
     environment:
       DATABASE_URL: postgresql+psycopg://fulfillpro:fulfillpro@db:5432/fulfillpro
-
       REDIS_URL: redis://redis:6379/0
       STORAGE_ROOT: /app/storage
+      STORAGE_MAX_GB: "100"
+      # Capacidad bajo 12 GB stack: 3 workers (Excel en proceso es pesado)
+      UVICORN_WORKERS: "3"
+      # 3 workers × (12+8) = 60 < postgres max_connections 100
+      DB_POOL_SIZE: "12"
+      DB_MAX_OVERFLOW: "8"
+      MAX_ROWS: "60000"
+      RATE_LIMIT_LOGIN: "20"
+      RATE_LIMIT_PROCESS: "40"
+      # development: permite demos y secretos de lab. En prod real usar production + secretos fuertes.
+      APP_ENV: development
+      SEED_DEMO_USERS: "true"
+      ALLOW_PUBLIC_REGISTER: "true"
+      CORS_ORIGINS: "http://localhost:8000,http://127.0.0.1:8000"
     volumes:
       - ./storage:/app/storage
       - ./frontend:/app/frontend:ro
@@ -46,6 +103,16 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 7G
+        reservations:
+          cpus: "1.0"
+          memory: 2G
+    mem_limit: 7g
+    cpus: 4.0
 
 volumes:
   pgdata:

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from backend.app.config import get_settings
 from backend.app.core.rate_limit import rate_limit_from_request
 from backend.app.database import get_db
-from backend.app.dependencies import get_current_user
+from backend.app.dependencies import require_consent
 from backend.app.models.user import User
 from backend.app.services import order_service, storage_service
 
@@ -19,16 +19,14 @@ async def process_one_shot(
     request: Request,
     file: UploadFile = File(...),
     license_code: Optional[str] = Form(None),
-    count_quota: str = Form("true"),
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_consent),
 ):
-    """Sube + procesa usando la licencia de la empresa del usuario (sin activar equipos)."""
+    """Sube + procesa usando la licencia de la empresa (requiere consentimiento firmado)."""
     settings = get_settings()
     rate_limit_from_request(request, "process", settings.rate_limit_process, 60)
     content = await file.read()
     ip = request.client.host if request.client else ""
-    count = str(count_quota).lower() not in {"false", "0", "no", "off"}
 
     order = order_service.create_order_from_upload(
         db,
@@ -36,7 +34,6 @@ async def process_one_shot(
         file=file,
         content=content,
         license_code=license_code or None,
-        count_quota=count,
         ip=ip,
     )
     order = order_service.process_order(
@@ -61,7 +58,6 @@ async def process_one_shot(
             "X-Total-Risk": str(int(order.total_risk or 0)),
             "X-Row-Count": str(order.row_count or 0),
             "X-Company-Name": str(meta.get("company_name") or order.client_code or ""),
-            # Exponer headers al frontend (fetch)
             "Access-Control-Expose-Headers": (
                 "X-Order-Id, X-Priority-Count, X-Total-Risk, X-Row-Count, X-Company-Name, Content-Disposition"
             ),

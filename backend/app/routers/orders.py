@@ -6,7 +6,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from backend.app.database import get_db
-from backend.app.dependencies import get_current_user
+from backend.app.dependencies import get_current_user, require_consent
 from backend.app.models.user import User
 from backend.app.schemas.order import OrderListResponse, OrderOut
 from backend.app.services import order_service, storage_service
@@ -19,20 +19,17 @@ async def upload_order(
     request: Request,
     file: UploadFile = File(...),
     license_code: Optional[str] = Form(None),
-    count_quota: str = Form("true"),
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_consent),
 ):
     content = await file.read()
     ip = request.client.host if request.client else ""
-    count = str(count_quota).lower() not in {"false", "0", "no", "off"}
     return order_service.create_order_from_upload(
         db,
         user=user,
         file=file,
         content=content,
         license_code=license_code or None,
-        count_quota=count,
         ip=ip,
     )
 
@@ -43,7 +40,7 @@ def process(
     request: Request,
     license_code: Optional[str] = Form(None),
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_consent),
 ):
     order = order_service.get_order(db, order_id, user)
     ip = request.client.host if request.client else ""
@@ -84,8 +81,10 @@ def download_file(
     order_id: UUID,
     kind: str,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_consent),
 ):
+    if kind not in ("input", "output", "prioritarias"):
+        raise HTTPException(400, "Tipo de archivo no válido.")
     order = order_service.get_order(db, order_id, user)
     match = next((f for f in order.files if f.kind == kind), None)
     if not match:

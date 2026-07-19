@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from backend.app.core.security import safe_decode
 from backend.app.database import get_db
 from backend.app.models.user import User
+from backend.app.services import legal_service
 
 bearer = HTTPBearer(auto_error=False)
 
@@ -38,6 +39,26 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
     if user.role != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Se requiere rol administrador.")
     return user
+
+
+def require_consent(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> User:
+    """
+    OWASP A01: el consentimiento legal debe exigirse en backend, no solo en UI.
+    Platform admin no requiere términos de colaborador.
+    """
+    if legal_service.needs_consent(db, user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Debes firmar los términos y el consentimiento legal antes de usar la plataforma. "
+                "Completa el proceso en /api/legal/pending y /api/legal/sign."
+            ),
+        )
+    return user
+
 
 
 def get_optional_user(

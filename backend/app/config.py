@@ -20,7 +20,12 @@ class Settings(BaseSettings):
     admin_password: str = "AdminFulfillPro2026!"
     admin_name: str = "Administrador"
 
+    # En production el registro público por código de licencia queda deshabilitado por defecto
+    allow_public_register: bool = True
+    seed_demo_users: bool = True
+
     storage_root: str = "./storage"
+    storage_max_gb: int = 100  # política de capacidad de disco del despliegue
     cors_origins: str = "*"
 
     max_rows: int = 60000
@@ -29,6 +34,12 @@ class Settings(BaseSettings):
 
     rate_limit_login: int = 10
     rate_limit_process: int = 30
+
+    # Capacidad / pool (perfil 12 GB stack)
+    uvicorn_workers: int = 3
+    db_pool_size: int = 20
+    db_max_overflow: int = 20
+
 
     @property
     def cors_origin_list(self) -> List[str]:

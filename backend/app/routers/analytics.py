@@ -7,7 +7,7 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from backend.app.database import get_db
-from backend.app.dependencies import get_current_user
+from backend.app.dependencies import get_current_user, require_consent
 from backend.app.models.analytics import AnalyticsWeek
 from backend.app.models.user import User
 from backend.app.services import analytics_service, license_service
@@ -139,7 +139,7 @@ def consolidate(
     week_id: UUID,
     force: bool = False,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_consent),
 ):
     """
     Genera el consolidado de la semana.

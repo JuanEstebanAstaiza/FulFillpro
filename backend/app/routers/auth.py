@@ -44,9 +44,22 @@ def login_platform(body: LoginRequest, request: Request, db: Session = Depends(g
 @router.post("/register", response_model=TokenResponse)
 def register(body: RegisterRequest, request: Request, db: Session = Depends(get_db)):
     """Registro del admin de empresa con código de licencia."""
+    from fastapi import HTTPException
+
     settings = get_settings()
+    # OWASP A04/A07: en production el alta pública se desactiva por defecto
+    if settings.is_production and not settings.allow_public_register:
+        raise HTTPException(
+            403,
+            "El registro público está deshabilitado. Contacta al administrador de la plataforma "
+            "para que cree tu cuenta de empresa.",
+        )
     rate_limit_from_request(request, "register", settings.rate_limit_login, 60)
     ip = request.client.host if request.client else ""
+    # Longitud mínima de código de licencia en production
+    code = (body.license_code or "").strip()
+    if settings.is_production and len(code) < 10:
+        raise HTTPException(400, "Código de licencia inválido.")
     user = auth_service.register_with_license(db, body.model_dump(), ip=ip)
     return auth_service.issue_tokens(db, user)
 

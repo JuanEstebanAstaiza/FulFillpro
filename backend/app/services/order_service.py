@@ -27,13 +27,24 @@ def create_order_from_upload(
     file: UploadFile,
     content: bytes,
     license_code: Optional[str] = None,
-    count_quota: bool = True,
     ip: str = "",
 ) -> Order:
+    # Límite de subida (defensa en profundidad)
+    max_upload = 50 * 1024 * 1024
+    if len(content) > max_upload:
+        raise HTTPException(413, "Archivo demasiado grande (máximo 50 MB).")
+    # Magic bytes básicos OOXML / OLE
+    if not (
+        content[:2] == b"PK"  # xlsx zip
+        or content[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"  # xls OLE
+    ):
+        raise HTTPException(400, "El archivo no parece un Excel válido (.xlsx/.xls).")
+
     lic = assert_user_license(db, user, license_code)
     brand = company_brand(lic, user)
     client = user.client_code or brand["company_code"] or user.email.split("@")[0].upper()
 
+    # Cupo: solo lo decide la licencia en servidor (OWASP A01 — sin flag del cliente)
     order = Order(
         user_id=user.id,
         license_id=lic.id,
@@ -41,7 +52,7 @@ def create_order_from_upload(
         status="uploaded",
         original_filename=file.filename or "upload.xlsx",
         device_id="",
-        counted_toward_quota=bool(count_quota and lic.count_toward_global),
+        counted_toward_quota=bool(lic.count_toward_global),
     )
     db.add(order)
     db.commit()
