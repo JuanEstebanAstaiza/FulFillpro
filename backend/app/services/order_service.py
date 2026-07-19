@@ -144,12 +144,7 @@ def process_order(
             )
         )
 
-        total_uds = sum(
-            int(row.get(c, 0) or 0)
-            for row in resumen_final
-            for c in cant_cols
-            if row.get(c, "") != ""
-        )
+        total_uds = sum(int(row.get("TOTAL_UNIDADES", 0) or 0) for row in resumen_final)
         n_combos = sum(1 for r in resumen_final if str(r.get("VARIABLES", "")).upper() == "COMBO")
         meta = {
             "productos": len(resumen_final),

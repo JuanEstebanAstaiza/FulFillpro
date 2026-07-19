@@ -94,9 +94,15 @@ def process_rows(rows: list[dict[str, Any]], today: date) -> tuple:
 
     resumen_final = sorted(unified.values(), key=lambda r: r["PRODUCTO"])
     for row in resumen_final:
+        total_unidades = 0
         for c in range(1, cant_max + 1):
             v = row.get(f"Cantidad {c}", 0)
-            row[f"Cantidad {c}"] = int(v) if v and int(v) > 0 else ""
+            n_ordenes = int(v) if v and int(v) > 0 else 0
+            # Columna Cant. c = cuántas órdenes piden c unidades del producto/combo
+            # Total a alistar = sumatoria (c × n_ordenes)
+            total_unidades += c * n_ordenes
+            row[f"Cantidad {c}"] = n_ordenes if n_ordenes > 0 else ""
+        row["TOTAL_UNIDADES"] = total_unidades
 
     reporte = sorted(
         [{"ID ORDEN": r["id"], "PRODUCTO": r["producto"], "CANTIDAD": r["cantidad"]} for r in rows],

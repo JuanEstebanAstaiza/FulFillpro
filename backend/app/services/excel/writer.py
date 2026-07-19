@@ -152,14 +152,12 @@ def build_excel(
         f"Prohibida la reventa o uso por otras empresas"
     )
 
-    total_uds = sum(
-        int(row.get(c, 0) or 0)
-        for row in resumen_final
-        for c in cant_cols
-        if row.get(c, "") != ""
-    )
+    # Unidades físicas a alistar: sumatoria (tamaño_paquete × n_órdenes) por fila
+    total_uds = sum(int(row.get("TOTAL_UNIDADES", 0) or 0) for row in resumen_final)
     n_combos = sum(1 for r in resumen_final if str(r.get("VARIABLES", "")).upper() == "COMBO")
-    ncols1 = 2 + cant_max
+    # VARIACION | PRODUCTO | Cant.1..N | TOTAL UNID.
+    ncols1 = 2 + cant_max + 1
+    total_col = ncols1  # última columna
 
     # HOJA 1: RESUMEN
     # Filas: 1 banner, 2 company, 3 metrics, 4 spacer, 5 headers, 6+ data
@@ -169,27 +167,33 @@ def build_excel(
     ws1.sheet_view.showGridLines = False
     ws1.column_dimensions["A"].width = 12
     ws1.column_dimensions["B"].width = 38
-    for i in range(3, ncols1 + 1):
+    for i in range(3, ncols1):
         ws1.column_dimensions[get_column_letter(i)].width = 9
+    ws1.column_dimensions[get_column_letter(total_col)].width = 12
 
     banner(ws1, ncols1, f"FulfillPro · {co} — Resumen de Órdenes para Bodega", P["VC"], 14, 30)
     company_strip(ws1, ncols1, co, company_code, license_code)
     subtitle(
         ws1,
         ncols1,
-        f"{len(resumen_final)} productos - {total_uds} unidades - {n_combos} combos | Fecha: {today_str}",
+        f"{len(resumen_final)} productos - {total_uds} unidades a alistar - {n_combos} combos | Fecha: {today_str}",
     )
     spacer(ws1, ncols1)
 
-    ws1.append(["VARIACION", "PRODUCTO"] + [f"Cant. {i}" for i in range(1, cant_max + 1)])
+    ws1.append(
+        ["VARIACION", "PRODUCTO"]
+        + [f"Cant. {i}" for i in range(1, cant_max + 1)]
+        + ["TOTAL UNID."]
+    )
     r = ws1.max_row
     header_row = r
     data_start = header_row + 1
     ws1.row_dimensions[r].height = 26
     hdr(ws1.cell(r, 1), P["GH"])
     hdr(ws1.cell(r, 2), P["GH"], "left")
-    for ci in range(3, ncols1 + 1):
+    for ci in range(3, ncols1):
         hdr(ws1.cell(r, ci), P["VC"])
+    hdr(ws1.cell(r, total_col), "0D47A1")  # azul: total unidades a despachar
     ws1.freeze_panes = f"A{data_start}"
 
     for i, row in enumerate(resumen_final):
@@ -197,7 +201,7 @@ def build_excel(
         bg = P["AL"] if es_c else (P["VL"] if i % 2 == 0 else P["GL"])
         vals = [row.get("VARIABLES", ""), row.get("PRODUCTO", "")] + [
             row.get(f"Cantidad {j}", "") or None for j in range(1, cant_max + 1)
-        ]
+        ] + [int(row.get("TOTAL_UNIDADES", 0) or 0) or None]
         ws1.append(vals)
         r = ws1.max_row
         ws1.row_dimensions[r].height = 30
@@ -211,11 +215,17 @@ def build_excel(
             True,
         )
         sty(ws1.cell(r, 2), bg, "4E342E" if es_c else "212121", 10, es_c, "left", True)
-        for ci in range(3, ncols1 + 1):
+        for ci in range(3, ncols1):
             if ws1.cell(r, ci).value:
                 sty(ws1.cell(r, ci), bg, "5D4037" if es_c else P["VC"], 11, True, "center", False)
             else:
                 sty(ws1.cell(r, ci), bg, "CFD8DC", 10, False, "center", False)
+        # TOTAL UNID. resaltado
+        c_tot = ws1.cell(r, total_col)
+        if c_tot.value:
+            sty(c_tot, "E3F2FD", "0D47A1", 12, True, "center", False)
+        else:
+            sty(c_tot, bg, "CFD8DC", 10, False, "center", False)
 
     sep = ws1.max_row + 1
     ws1.row_dimensions[sep].height = 4
@@ -225,6 +235,7 @@ def build_excel(
         c.border = Border(top=_SM, bottom=_SM)
 
     data_end = data_start + len(resumen_final) - 1 if resumen_final else data_start
+    total_letter = get_column_letter(total_col)
     ws1.append(
         [""]
         + [f"TOTAL - {total_uds} unidades"]
@@ -232,14 +243,16 @@ def build_excel(
             f"=SUM({get_column_letter(ci + 3)}{data_start}:{get_column_letter(ci + 3)}{data_end})"
             for ci in range(cant_max)
         ]
+        + [f"=SUM({total_letter}{data_start}:{total_letter}{data_end})"]
     )
     r = ws1.max_row
     ws1.row_dimensions[r].height = 26
     ws1.cell(r, 1).fill = _fill(P["VM"])
     ws1.cell(r, 1).border = _BRD
     hdr(ws1.cell(r, 2), P["VM"], "left")
-    for ci in range(3, ncols1 + 1):
+    for ci in range(3, ncols1):
         hdr(ws1.cell(r, ci), P["VM"])
+    hdr(ws1.cell(r, total_col), "0D47A1")
 
     brand_footer(ws1, ncols1, footer_txt)
 
