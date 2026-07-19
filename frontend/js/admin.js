@@ -34,7 +34,23 @@ async function init() {
   $("#template").addEventListener("change", applyTemplateHints);
   applyTemplateHints();
 
-  await Promise.all([loadOverview(), loadLicenses(), loadUsers(), loadLogs(), loadIncidents()]);
+  await Promise.all([
+    loadOverview(),
+    loadCompanyUsage(),
+    loadLicenses(),
+    loadUsers(),
+    loadLogs(),
+    loadIncidents(),
+  ]);
+}
+
+function fmtDate(iso) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString();
+  } catch {
+    return iso;
+  }
 }
 
 async function loadOverview() {
@@ -43,6 +59,11 @@ async function loadOverview() {
     <div class="stats">
       <div class="stat"><div class="label">Usuarios</div><div class="value">${d.total_users}</div></div>
       <div class="stat"><div class="label">Licencias activas</div><div class="value">${d.active_licenses}</div></div>
+      <div class="stat">
+        <div class="label">Empresas</div>
+        <div class="value">${d.companies_total ?? "—"}</div>
+        <div class="hint">${d.companies_active_7d ?? 0} activas (7d) · ${d.companies_inactive ?? 0} sin uso 7d</div>
+      </div>
       <div class="stat"><div class="label">Órdenes hoy</div><div class="value">${d.orders_today}</div></div>
       <div class="stat"><div class="label">Órdenes 7d</div><div class="value">${d.orders_week}</div></div>
       <div class="stat"><div class="label">Fallidas 7d</div><div class="value">${d.failed_week}</div></div>
@@ -63,7 +84,45 @@ async function loadOverview() {
           .join("")}
       </tbody>
     </table>
+    <p class="hint" style="margin-top:1rem">Detalle por cliente en la pestaña <strong>Uso empresas</strong>.</p>
   `;
+}
+
+async function loadCompanyUsage() {
+  const data = await API.request("/api/admin/monitoring/companies");
+  const s = data.summary || {};
+  $("#usage-summary").innerHTML = `
+    <div class="stat"><div class="label">Total empresas</div><div class="value">${s.total || 0}</div></div>
+    <div class="stat"><div class="label">Activas 7d</div><div class="value">${s.active || 0}</div>
+      <div class="hint">Procesaron al menos 1 orden esta semana</div></div>
+    <div class="stat warn-stat"><div class="label">Uso reciente 30d</div><div class="value">${s.warm || 0}</div></div>
+    <div class="stat"><div class="label">Inactivas +30d</div><div class="value">${s.dormant || 0}</div></div>
+    <div class="stat danger-stat"><div class="label">Sin uso jamás</div><div class="value">${s.never || 0}</div>
+      <div class="hint">Con cuenta pero sin procesar</div></div>
+  `;
+  const items = data.items || [];
+  if (!items.length) {
+    $("#usage-body").innerHTML = `<tr><td colspan="11" class="muted">Sin empresas registradas.</td></tr>`;
+    return;
+  }
+  $("#usage-body").innerHTML = items
+    .map((r) => {
+      const hc = `health-${r.health || "never"}`;
+      return `<tr>
+        <td><strong>${escape(r.company_name)}</strong></td>
+        <td class="mono">${escape(r.client_code || "—")}</td>
+        <td class="${hc}">${escape(r.health_label || r.health)}</td>
+        <td>${r.active_users || 0}/${r.users || 0}</td>
+        <td>${r.orders_today || 0}</td>
+        <td><strong>${r.orders_7d || 0}</strong></td>
+        <td>${r.orders_30d || 0}</td>
+        <td>${r.orders_total || 0}</td>
+        <td>${r.license_uses || 0}</td>
+        <td class="muted">${fmtDate(r.last_order_at)}</td>
+        <td class="muted">${fmtDate(r.last_login)}</td>
+      </tr>`;
+    })
+    .join("");
 }
 
 async function loadLicenses() {

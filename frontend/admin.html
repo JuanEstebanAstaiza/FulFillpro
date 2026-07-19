@@ -19,7 +19,8 @@
       </div>
       <nav class="sidebar-nav">
         <button class="tab nav-item active" data-tab="overview" type="button"><span class="ico">◈</span> Monitoreo</button>
-        <button class="tab nav-item" data-tab="licenses" type="button"><span class="ico">▣</span> Licencias</button>
+        <button class="tab nav-item" data-tab="usage" type="button"><span class="ico">▣</span> Uso empresas</button>
+        <button class="tab nav-item" data-tab="licenses" type="button"><span class="ico">▤</span> Licencias</button>
         <button class="tab nav-item" data-tab="users" type="button"><span class="ico">◎</span> Usuarios</button>
         <button class="tab nav-item" data-tab="logs" type="button"><span class="ico">☰</span> Logs</button>
         <button class="tab nav-item" data-tab="incidents" type="button"><span class="ico">!</span> Incidentes</button>
@@ -47,6 +48,34 @@
           <h2>Monitoreo</h2>
           <p class="lead">Vista operativa y de seguridad de toda la plataforma.</p>
           <div id="overview"></div>
+        </section>
+
+        <section data-panel="usage" class="hidden">
+          <div class="card">
+            <h2>Uso por empresa</h2>
+            <p class="lead">
+              Identifica qué clientes están activos, dormidos o nunca han procesado órdenes.
+            </p>
+            <div id="usage-summary" class="stats" style="margin-bottom:1.1rem"></div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Empresa</th>
+                  <th>Código</th>
+                  <th>Estado</th>
+                  <th>Usuarios</th>
+                  <th>Hoy</th>
+                  <th>7 días</th>
+                  <th>30 días</th>
+                  <th>Total</th>
+                  <th>Usos licencia</th>
+                  <th>Última orden</th>
+                  <th>Último login</th>
+                </tr>
+              </thead>
+              <tbody id="usage-body"></tbody>
+            </table>
+          </div>
         </section>
 
         <section data-panel="licenses" class="hidden">

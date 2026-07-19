@@ -50,9 +50,20 @@ async def process_one_shot(
     if not out:
         raise HTTPException(500, "No se generó el archivo de salida.")
     path = storage_service.absolute_from_relative(out.relative_path)
+    meta = order.meta or {}
     return FileResponse(
         path,
         filename=out.filename,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"X-Order-Id": str(order.id)},
+        headers={
+            "X-Order-Id": str(order.id),
+            "X-Priority-Count": str(order.priority_count or 0),
+            "X-Total-Risk": str(int(order.total_risk or 0)),
+            "X-Row-Count": str(order.row_count or 0),
+            "X-Company-Name": str(meta.get("company_name") or order.client_code or ""),
+            # Exponer headers al frontend (fetch)
+            "Access-Control-Expose-Headers": (
+                "X-Order-Id, X-Priority-Count, X-Total-Risk, X-Row-Count, X-Company-Name, Content-Disposition"
+            ),
+        },
     )

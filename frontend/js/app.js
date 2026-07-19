@@ -246,30 +246,130 @@ function pickFile(file) {
   $("#upload-hint").textContent = "Listo para procesar";
 }
 
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function setProcessProgress(pct, stage) {
+  const p = Math.max(0, Math.min(100, Math.round(pct)));
+  const fill = $("#process-bar-fill");
+  const label = $("#process-pct");
+  const stageEl = $("#process-stage");
+  if (fill) fill.style.width = p + "%";
+  if (label) label.textContent = p + "%";
+  if (stageEl && stage) stageEl.textContent = stage;
+}
+
+function showProcessOverlay(show) {
+  $("#process-overlay").classList.toggle("hidden", !show);
+  if (show) setProcessProgress(0, "Preparando…");
+}
+
+function showToast(title, message, type = "warn", duration = 6500) {
+  const stack = $("#toast-stack");
+  if (!stack) return;
+  const el = document.createElement("div");
+  el.className = `toast toast-${type}`;
+  const ico = type === "ok" ? "✓" : type === "danger" ? "!" : "⚠";
+  el.innerHTML = `<div class="toast-ico">${ico}</div><div><strong>${escapeHtml(
+    title
+  )}</strong><p>${escapeHtml(message)}</p></div>`;
+  stack.appendChild(el);
+  setTimeout(() => {
+    el.style.opacity = "0";
+    el.style.transition = "opacity .3s";
+    setTimeout(() => el.remove(), 320);
+  }, duration);
+}
+
 async function onProcess() {
   if (!selectedFile) return;
   hideAlert($("#global-alert"));
   const btn = $("#btn-process");
   btn.disabled = true;
   btn.textContent = "Procesando…";
+
+  showProcessOverlay(true);
+  setProcessProgress(8, "Subiendo archivo…");
+
+  // Progreso visual suave mientras corre el backend
+  let fake = 8;
+  const ticker = setInterval(() => {
+    if (fake < 72) {
+      fake += Math.random() * 6 + 2;
+      const stage =
+        fake < 25
+          ? "Subiendo archivo…"
+          : fake < 50
+          ? "Leyendo filas del Excel…"
+          : fake < 65
+          ? "Agrupando combos y cantidades…"
+          : "Calculando órdenes prioritarias…";
+      setProcessProgress(Math.min(fake, 72), stage);
+    }
+  }, 280);
+
   try {
     const res = await API.processFile(selectedFile);
+    clearInterval(ticker);
+
+    const priorityCount = parseInt(res.headers.get("X-Priority-Count") || "0", 10) || 0;
+    const totalRisk = parseInt(res.headers.get("X-Total-Risk") || "0", 10) || 0;
+    const rowCount = parseInt(res.headers.get("X-Row-Count") || "0", 10) || 0;
+
+    setProcessProgress(85, "Analizando órdenes en riesgo…");
+    await sleep(700);
+
+    // Toast / popup de prioritarias (hoja 3 del Excel)
+    if (priorityCount > 0) {
+      showToast(
+        `Tienes ${priorityCount} orden${priorityCount === 1 ? "" : "es"} en riesgo`,
+        `Corresponden a la hoja PRIORITARIAS del Excel. Riesgo estimado 20%: $${totalRisk.toLocaleString(
+          "es-CO"
+        )}. Revísalas antes de alistar.`,
+        priorityCount >= 5 ? "danger" : "warn",
+        8000
+      );
+      setProcessProgress(92, `${priorityCount} órdenes prioritarias detectadas`);
+      await sleep(1400);
+    } else {
+      showToast(
+        "Sin órdenes en riesgo",
+        "No hay guías atrasadas para la hoja PRIORITARIAS en este archivo.",
+        "ok",
+        4500
+      );
+      setProcessProgress(92, "Sin prioritarias · generando descarga…");
+      await sleep(600);
+    }
+
+    setProcessProgress(98, "Preparando descarga…");
     const blob = await res.blob();
+    await sleep(350);
+    setProcessProgress(100, "¡Listo!");
+
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = selectedFile.name.replace(/\.xlsx?$/i, "") + "_FulfillPro.xlsx";
     a.click();
     URL.revokeObjectURL(a.href);
+
+    await sleep(400);
+    showProcessOverlay(false);
+
     showAlert(
       $("#global-alert"),
-      "Orden procesada. El Excel incluye el distintivo de tu empresa.",
+      `Procesado: ${rowCount} filas · ${priorityCount} en riesgo (PRIORITARIAS). Archivo descargado con distintivo de empresa.`,
       "ok"
     );
     selectedFile = null;
     $("#file-name").textContent = "Ningún archivo seleccionado";
     $("#upload-hint").textContent = "";
   } catch (err) {
+    clearInterval(ticker);
+    showProcessOverlay(false);
     showAlert($("#global-alert"), err.message);
+    showToast("Error al procesar", err.message, "danger", 6000);
   } finally {
     btn.disabled = false;
     btn.textContent = "Procesar y descargar";

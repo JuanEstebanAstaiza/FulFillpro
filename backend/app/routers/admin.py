@@ -251,6 +251,20 @@ def monitoring_overview(db: Session = Depends(get_db), _: User = Depends(require
         .all()
     )
 
+    # Empresas con actividad reciente
+    companies_with_orders_7d = (
+        db.query(func.count(func.distinct(Order.client_code)))
+        .filter(Order.created_at >= week_ago, Order.client_code != "")
+        .scalar()
+        or 0
+    )
+    companies_total = (
+        db.query(func.count(func.distinct(User.client_code)))
+        .filter(User.client_code != "", User.role != "admin")
+        .scalar()
+        or 0
+    )
+
     return {
         "total_users": total_users,
         "active_licenses": active_licenses,
@@ -260,11 +274,207 @@ def monitoring_overview(db: Session = Depends(get_db), _: User = Depends(require
         "failed_week": failed_week,
         "open_incidents": open_incidents,
         "critical_open": critical_open,
+        "companies_total": companies_total,
+        "companies_active_7d": companies_with_orders_7d,
+        "companies_inactive": max(companies_total - companies_with_orders_7d, 0),
         "orders_by_status": {s: c for s, c in by_status},
         "top_licenses_by_use": [
             {"code": c, "label": l, "uses": u, "limit": lim}
             for c, l, u, lim in top_licenses
         ],
+    }
+
+
+@router.get("/monitoring/companies")
+def monitoring_companies(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    """
+    Métricas de uso por empresa: si están activas, dormidas o nunca han procesado.
+    """
+    now = datetime.utcnow()
+    day_ago = now - timedelta(days=1)
+    week_ago = now - timedelta(days=7)
+    month_ago = now - timedelta(days=30)
+
+    # Usuarios no-plataforma agrupados por client_code
+    users = (
+        db.query(User)
+        .filter(User.role != "admin", User.client_code != "")
+        .all()
+    )
+    by_code: dict[str, dict] = {}
+    for u in users:
+        code = u.client_code
+        if code not in by_code:
+            by_code[code] = {
+                "client_code": code,
+                "company_name": u.company_name or code,
+                "users": 0,
+                "active_users": 0,
+                "last_login": None,
+                "user_ids": [],
+            }
+        row = by_code[code]
+        row["users"] += 1
+        row["user_ids"].append(u.id)
+        if u.is_active:
+            row["active_users"] += 1
+        if u.company_name:
+            row["company_name"] = u.company_name
+        if u.last_login and (row["last_login"] is None or u.last_login > row["last_login"]):
+            row["last_login"] = u.last_login
+
+    # Licencias por owner → client_code
+    licenses = db.query(License).all()
+    owner_to_code = {u.id: u.client_code for u in users}
+    for lic in licenses:
+        code = owner_to_code.get(lic.owner_user_id) if lic.owner_user_id else None
+        if not code and lic.company_name:
+            # emparejar por company_name
+            for c, data in by_code.items():
+                if data["company_name"] == lic.company_name:
+                    code = c
+                    break
+        if not code:
+            # licencia sin empresa de usuarios aún
+            key = f"LIC:{lic.code}"
+            if key not in by_code:
+                by_code[key] = {
+                    "client_code": "",
+                    "company_name": lic.company_name or lic.label or lic.code,
+                    "users": 0,
+                    "active_users": 0,
+                    "last_login": None,
+                    "user_ids": [],
+                }
+            code = key
+        data = by_code.setdefault(
+            code,
+            {
+                "client_code": code if not str(code).startswith("LIC:") else "",
+                "company_name": lic.company_name or code,
+                "users": 0,
+                "active_users": 0,
+                "last_login": None,
+                "user_ids": [],
+            },
+        )
+        data.setdefault("licenses", [])
+        data["licenses"].append(
+            {
+                "code": lic.code,
+                "label": lic.label,
+                "uses": lic.uses or 0,
+                "limit_uses": lic.limit_uses or 0,
+                "active": lic.active,
+                "last_access": lic.last_access.isoformat() if lic.last_access else None,
+            }
+        )
+
+    # Agregar órdenes por client_code
+    order_stats = (
+        db.query(
+            Order.client_code,
+            func.count(Order.id),
+            func.max(Order.created_at),
+            func.sum(Order.priority_count),
+        )
+        .filter(Order.client_code != "")
+        .group_by(Order.client_code)
+        .all()
+    )
+    order_map = {c: {"total": n, "last": last, "priority_sum": int(p or 0)} for c, n, last, p in order_stats}
+
+    orders_7d = (
+        db.query(Order.client_code, func.count(Order.id))
+        .filter(Order.created_at >= week_ago, Order.client_code != "")
+        .group_by(Order.client_code)
+        .all()
+    )
+    map_7d = {c: n for c, n in orders_7d}
+
+    orders_30d = (
+        db.query(Order.client_code, func.count(Order.id))
+        .filter(Order.created_at >= month_ago, Order.client_code != "")
+        .group_by(Order.client_code)
+        .all()
+    )
+    map_30d = {c: n for c, n in orders_30d}
+
+    orders_1d = (
+        db.query(Order.client_code, func.count(Order.id))
+        .filter(Order.created_at >= day_ago, Order.client_code != "")
+        .group_by(Order.client_code)
+        .all()
+    )
+    map_1d = {c: n for c, n in orders_1d}
+
+    result = []
+    for code, data in by_code.items():
+        client = data["client_code"] or ""
+        # Para claves LIC:xxx no hay client_code real
+        o = order_map.get(client, {"total": 0, "last": None, "priority_sum": 0})
+        last_order = o["last"]
+        n7 = map_7d.get(client, 0)
+        n30 = map_30d.get(client, 0)
+        n1 = map_1d.get(client, 0)
+
+        if n7 > 0:
+            health = "active"
+            health_label = "Activa (7d)"
+        elif n30 > 0:
+            health = "warm"
+            health_label = "Uso reciente (30d)"
+        elif o["total"] > 0:
+            health = "dormant"
+            health_label = "Inactiva (+30d)"
+        else:
+            health = "never"
+            health_label = "Sin uso"
+
+        lics = data.get("licenses") or []
+        total_uses = sum(x.get("uses", 0) for x in lics)
+
+        result.append(
+            {
+                "client_code": client,
+                "company_name": data["company_name"],
+                "users": data["users"],
+                "active_users": data["active_users"],
+                "last_login": data["last_login"].isoformat() if data["last_login"] else None,
+                "orders_total": o["total"] or 0,
+                "orders_today": n1,
+                "orders_7d": n7,
+                "orders_30d": n30,
+                "priority_orders_sum": o["priority_sum"],
+                "last_order_at": last_order.isoformat() if last_order else None,
+                "license_uses": total_uses,
+                "licenses": lics,
+                "health": health,
+                "health_label": health_label,
+            }
+        )
+
+    # Orden: activas primero, luego por última orden
+    order_health = {"active": 0, "warm": 1, "dormant": 2, "never": 3}
+    result.sort(
+        key=lambda r: (
+            order_health.get(r["health"], 9),
+            -(r["orders_7d"] or 0),
+            r["company_name"] or "",
+        )
+    )
+    return {
+        "items": result,
+        "summary": {
+            "total": len(result),
+            "active": sum(1 for r in result if r["health"] == "active"),
+            "warm": sum(1 for r in result if r["health"] == "warm"),
+            "dormant": sum(1 for r in result if r["health"] == "dormant"),
+            "never": sum(1 for r in result if r["health"] == "never"),
+        },
     }
 
 

@@ -10,6 +10,19 @@
 </head>
 <body>
 
+  <!-- TOASTS -->
+  <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
+
+  <!-- PROCESS OVERLAY -->
+  <div id="process-overlay" class="process-overlay hidden">
+    <div class="process-card">
+      <h3>Procesando tu archivo</h3>
+      <p class="stage" id="process-stage">Preparando…</p>
+      <div class="process-bar"><span id="process-bar-fill"></span></div>
+      <div class="process-pct" id="process-pct">0%</div>
+    </div>
+  </div>
+
   <!-- LEGAL OVERLAY (primer login empleado / admin empresa) -->
   <div id="legal-overlay" class="legal-overlay hidden">
     <div class="legal-panel">
