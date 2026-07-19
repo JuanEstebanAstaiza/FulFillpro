@@ -308,7 +308,8 @@ function showToast(title, message, type = "warn", duration = 6500) {
   if (!stack) return;
   const el = document.createElement("div");
   el.className = `toast toast-${type}`;
-  const ico = type === "ok" ? "✓" : type === "danger" ? "!" : "⚠";
+  const ico = type === "ok" ? "✓" : type === "danger" ? "!" : type === "info" ? "ℹ" : "⚠";
+  el.className = `toast toast-${type === "info" ? "ok" : type}`;
   el.innerHTML = `<div class="toast-ico">${ico}</div><div><strong>${escapeHtml(
     title
   )}</strong><p>${escapeHtml(message)}</p></div>`;
@@ -325,86 +326,112 @@ async function onProcess() {
   hideAlert($("#global-alert"));
   const btn = $("#btn-process");
   btn.disabled = true;
-  btn.textContent = "Procesando…";
+  btn.textContent = "Encolando…";
+  const originalName = selectedFile.name;
 
   showProcessOverlay(true);
-  setProcessProgress(8, "Subiendo archivo…");
-
-  // Progreso visual suave mientras corre el backend
-  let fake = 8;
-  const ticker = setInterval(() => {
-    if (fake < 72) {
-      fake += Math.random() * 6 + 2;
-      const stage =
-        fake < 25
-          ? "Subiendo archivo…"
-          : fake < 50
-          ? "Leyendo filas del Excel…"
-          : fake < 65
-          ? "Agrupando combos y cantidades…"
-          : "Calculando órdenes prioritarias…";
-      setProcessProgress(Math.min(fake, 72), stage);
-    }
-  }, 280);
+  setProcessProgress(5, "Subiendo y encolando…");
 
   try {
-    const res = await API.processFile(selectedFile);
-    clearInterval(ticker);
+    // 1) Encolar (202 JSON) — la API no procesa Excel; workers acotados lo hacen
+    const enqueued = await API.processFile(selectedFile);
+    const orderId = enqueued.order_id || enqueued.job_id;
+    if (!orderId) throw new Error("No se recibió order_id del servidor.");
 
-    const priorityCount = parseInt(res.headers.get("X-Priority-Count") || "0", 10) || 0;
-    const totalRisk = parseInt(res.headers.get("X-Total-Risk") || "0", 10) || 0;
-    const rowCount = parseInt(res.headers.get("X-Row-Count") || "0", 10) || 0;
+    const qPos = enqueued.queue_position || enqueued.queue_depth || "?";
+    setProcessProgress(12, `En cola (posición ~${qPos})…`);
+    showToast(
+      "Trabajo encolado",
+      `Tu archivo está en la cola (pos. ${qPos}). La plataforma acepta 100+ envíos a la vez; los workers procesan en paralelo de forma estable.`,
+      "info",
+      5500
+    );
 
-    setProcessProgress(85, "Analizando órdenes en riesgo…");
-    await sleep(700);
+    // 2) Polling adaptativo (rápido al inicio, más suave con cola profunda)
+    let status = "queued";
+    let priorityCount = 0;
+    let totalRisk = 0;
+    let rowCount = 0;
+    let lastError = "";
+    const started = Date.now();
+    const maxWaitMs = 30 * 60 * 1000; // 30 min
+    let pollMs = 800;
+    let ticks = 0;
 
-    // Toast / popup de prioritarias (hoja 3 del Excel)
+    while (Date.now() - started < maxWaitMs) {
+      await sleep(pollMs);
+      ticks += 1;
+      const st = await API.jobStatus(orderId);
+      status = st.status;
+      priorityCount = st.priority_count || 0;
+      totalRisk = st.total_risk || 0;
+      rowCount = st.row_count || 0;
+      lastError = st.error || "";
+      const depth = st.queue_depth ?? 0;
+      const prog = Math.max(12, Math.min(90, st.progress || 15));
+      const stage =
+        st.stage ||
+        (status === "queued"
+          ? `En cola (profundidad ${depth})…`
+          : status === "processing"
+          ? "Procesando Excel en worker…"
+          : status);
+      setProcessProgress(prog, stage);
+
+      // Polling más lento si hay mucha cola (menos carga en API con 100+ clientes)
+      if (status === "queued" && depth > 20) pollMs = Math.min(3000, 800 + Math.floor(depth * 20));
+      else if (status === "processing") pollMs = 1000;
+      else pollMs = 800;
+
+      if (status === "completed" || status === "failed") break;
+    }
+
+    if (status === "failed") {
+      throw new Error(lastError || "El procesamiento falló. Revisa el archivo o reintenta.");
+    }
+    if (status !== "completed") {
+      throw new Error(
+        "Tiempo de espera agotado. El job sigue en cola o procesándose; revisa el histórico más tarde."
+      );
+    }
+
+    setProcessProgress(92, "Analizando prioritarias…");
+    await sleep(400);
+
     if (priorityCount > 0) {
       showToast(
         `Tienes ${priorityCount} orden${priorityCount === 1 ? "" : "es"} en riesgo`,
-        `Corresponden a la hoja PRIORITARIAS del Excel. Riesgo estimado 20%: $${totalRisk.toLocaleString(
-          "es-CO"
-        )}. Revísalas antes de alistar.`,
+        `Hoja PRIORITARIAS · Riesgo 20%: $${Number(totalRisk).toLocaleString("es-CO")}.`,
         priorityCount >= 5 ? "danger" : "warn",
         8000
       );
-      setProcessProgress(92, `${priorityCount} órdenes prioritarias detectadas`);
-      await sleep(1400);
     } else {
-      showToast(
-        "Sin órdenes en riesgo",
-        "No hay guías atrasadas para la hoja PRIORITARIAS en este archivo.",
-        "ok",
-        4500
-      );
-      setProcessProgress(92, "Sin prioritarias · generando descarga…");
-      await sleep(600);
+      showToast("Sin órdenes en riesgo", "No hay guías atrasadas en PRIORITARIAS.", "ok", 4000);
     }
 
-    setProcessProgress(98, "Preparando descarga…");
+    setProcessProgress(96, "Descargando resultado…");
+    const res = await API.jobDownload(orderId);
     const blob = await res.blob();
-    await sleep(350);
     setProcessProgress(100, "¡Listo!");
 
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = selectedFile.name.replace(/\.xlsx?$/i, "") + "_FulfillPro.xlsx";
+    a.download = originalName.replace(/\.xlsx?$/i, "") + "_FulfillPro.xlsx";
     a.click();
     URL.revokeObjectURL(a.href);
 
-    await sleep(400);
+    await sleep(350);
     showProcessOverlay(false);
 
     showAlert(
       $("#global-alert"),
-      `Procesado: ${rowCount} filas · ${priorityCount} en riesgo (PRIORITARIAS). Archivo descargado con distintivo de empresa.`,
+      `Procesado en cola: ${rowCount} filas · ${priorityCount} en riesgo. Archivo descargado.`,
       "ok"
     );
     selectedFile = null;
     $("#file-name").textContent = "Ningún archivo seleccionado";
     $("#upload-hint").textContent = "";
   } catch (err) {
-    clearInterval(ticker);
     showProcessOverlay(false);
     showAlert($("#global-alert"), err.message);
     showToast("Error al procesar", err.message, "danger", 6000);

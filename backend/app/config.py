@@ -33,12 +33,20 @@ class Settings(BaseSettings):
     device_stale_days: int = 60
 
     rate_limit_login: int = 10
-    rate_limit_process: int = 30
+    # Encolado process: techos por usuario e IP (no es ejecución de Excel)
+    # Encolar es barato; el techo real de RAM lo pone WORKER_CONCURRENCY
+    rate_limit_process: int = 150  # por usuario / minuto (ráfagas de encolado)
+    rate_limit_process_ip: int = 500  # por IP / minuto (100+ perfiles detrás de NAT)
 
     # Capacidad / pool (perfil 12 GB stack)
-    uvicorn_workers: int = 3
-    db_pool_size: int = 20
-    db_max_overflow: int = 20
+    uvicorn_workers: int = 4
+    db_pool_size: int = 12
+    db_max_overflow: int = 8
+    process_max_queue: int = 500
+    worker_concurrency: int = 4
+    redis_max_connections: int = 100
+    max_upload_mb: int = 25  # techo por archivo (estabilidad API bajo 100 subidas concurrentes)
+
 
 
     @property

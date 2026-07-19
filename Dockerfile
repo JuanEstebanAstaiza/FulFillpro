@@ -22,6 +22,7 @@ ENV MPLCONFIGDIR=/tmp/matplotlib
 
 EXPOSE 8000
 
-# Workers configurables (default 3) para perfil de 7 GB API / 12 GB stack
-CMD ["sh", "-c", "uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --workers ${UVICORN_WORKERS:-3} --timeout-keep-alive 30 --limit-concurrency 200"]
+# API HTTP: alta concurrencia de encolado (Excel lo hacen los workers)
+# --limit-concurrency 400: 100+ subidas + polling de clientes sin rechazar en ráfaga
+CMD ["sh", "-c", "uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --workers ${UVICORN_WORKERS:-4} --timeout-keep-alive 30 --limit-concurrency 400 --backlog 2048"]
 

@@ -104,7 +104,17 @@ const API = {
   async processFile(file) {
     const fd = new FormData();
     fd.append("file", file);
+    // Respuesta 202 + job; el frontend hace polling
     return this.request("/api/process", { method: "POST", body: fd });
+  },
+  jobStatus(orderId) {
+    return this.request(`/api/jobs/${orderId}`);
+  },
+  async jobDownload(orderId) {
+    return this.request(`/api/jobs/${orderId}/download`);
+  },
+  queueStats() {
+    return this.request("/api/queue/stats");
   },
   legalPending() {
     return this.request("/api/legal/pending");

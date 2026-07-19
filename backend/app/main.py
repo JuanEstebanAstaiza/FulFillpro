@@ -160,8 +160,8 @@ def seed_database() -> None:
                         "label": "Demo estándar",
                         "company_name": "Demo interno",
                         "max_devices": 99,
-                        "limit_uses": 200,
-                        "daily_limit": 20,
+                        "limit_uses": 5000,
+                        "daily_limit": 500,  # suficiente para pruebas de 100+ concurrentes
                         "expiry": date.today() + timedelta(days=365),
                         "owner_user_id": demo_admin.id if demo_admin else None,
                     },
@@ -174,6 +174,13 @@ def seed_database() -> None:
                         lic.owner_user_id = demo_admin.id
                         lic.company_name = lic.company_name or "Demo interno"
                         lic.active = True
+                        # Alinear cupos demo con pruebas de carga (dev)
+                        if code == "DEMO-001":
+                            if (lic.daily_limit or 0) < 500:
+                                lic.daily_limit = 500
+                            if (lic.limit_uses or 0) and lic.limit_uses < 5000:
+                                lic.limit_uses = 5000
+                            lic.enforce_daily_limit = True
                 demo_admin.client_code = "DEMO"
                 demo_admin.company_name = demo_admin.company_name or "Demo interno"
                 demo_admin.role = "company_admin"

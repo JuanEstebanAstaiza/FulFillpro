@@ -93,14 +93,18 @@ def days_left(expiry: Optional[date]) -> Optional[int]:
 
 
 def uses_today(db: Session, license_id: UUID) -> int:
+    """
+    Cupo diario: cuenta órdenes del día que ocupan cupo (completadas + en vuelo).
+    Incluye queued/processing para que 100 encolados concurrentes no sobrepasen el plan.
+    """
     today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     return (
         db.query(func.count(Order.id))
         .filter(
             Order.license_id == license_id,
-            Order.status == "completed",
+            Order.created_at >= today_start,
+            Order.status.in_(("completed", "processing", "queued", "uploaded")),
             Order.counted_toward_quota.is_(True),
-            Order.processed_at >= today_start,
         )
         .scalar()
         or 0

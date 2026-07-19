@@ -1,12 +1,17 @@
-# FulfillPro — stack dimensionado para capacidad auditada:
-#   RAM total del stack: 12 GB
-#   Almacenamiento objetivo del volumen de datos: 100 GB
+# FulfillPro — estabilidad alta concurrencia (100+ envíos Excel)
 #
-# Notas Docker Desktop (Windows/Mac):
-#   - Los límites de memoria se aplican con cgroup (deploy.resources).
-#   - El tope de 100 GB de disco se aplica como política de aplicación
-#     (STORAGE_MAX_GB) + tamaño de volúmenes en el host; Docker no
-#     limita el tamaño de volumen local de forma portable en Desktop.
+# Arquitectura:
+#   api     → HTTP + validar + guardar + encolar Redis (NO procesa Excel)
+#   worker  → consume cola, N Excel en paralelo (WORKER_CONCURRENCY)
+#   redis   → cola de jobs (noeviction)
+#   db      → PostgreSQL
+#
+# RAM ~12 GB:
+#   api 2G · worker 5–6G · db 3G · redis 512M
+#
+# Más paralelismo Excel (sin colapsar API):
+#   docker compose up -d --build --scale worker=2
+#   (con scale, bajar WORKER_CONCURRENCY a 2–3 por réplica)
 
 services:
   db:
@@ -15,20 +20,19 @@ services:
       POSTGRES_USER: fulfillpro
       POSTGRES_PASSWORD: fulfillpro
       POSTGRES_DB: fulfillpro
-      # Memoria compartida / conexiones acordes a 4 GB
       POSTGRES_INITDB_ARGS: "--encoding=UTF8"
     command:
       - postgres
       - -c
-      - shared_buffers=1GB
+      - shared_buffers=768MB
       - -c
-      - effective_cache_size=3GB
+      - effective_cache_size=2GB
       - -c
       - work_mem=16MB
       - -c
       - maintenance_work_mem=256MB
       - -c
-      - max_connections=100
+      - max_connections=200
       - -c
       - max_wal_size=1GB
     volumes:
@@ -38,20 +42,22 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-    deploy:
-      resources:
-        limits:
-          cpus: "2.0"
-          memory: 4G
-        reservations:
-          cpus: "0.5"
-          memory: 1G
-    mem_limit: 4g
+    mem_limit: 3g
     cpus: 2.0
 
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--maxmemory", "400mb", "--maxmemory-policy", "allkeys-lru"]
+    # Cola de jobs: sin eviction (nunca borrar jobs por presión de memoria)
+    command:
+      - redis-server
+      - --maxmemory
+      - 450mb
+      - --maxmemory-policy
+      - noeviction
+      - --save
+      - ""
+      - --tcp-backlog
+      - "511"
     volumes:
       - redisdata:/data
     healthcheck:
@@ -59,13 +65,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 512M
-        reservations:
-          memory: 128M
     mem_limit: 512m
     cpus: 0.5
 
@@ -82,15 +81,17 @@ services:
       REDIS_URL: redis://redis:6379/0
       STORAGE_ROOT: /app/storage
       STORAGE_MAX_GB: "100"
-      # Capacidad bajo 12 GB stack: 3 workers (Excel en proceso es pesado)
-      UVICORN_WORKERS: "3"
-      # 3 workers × (12+8) = 60 < postgres max_connections 100
+      # API ligera: solo HTTP + encolar (no procesa Excel)
+      UVICORN_WORKERS: "4"
       DB_POOL_SIZE: "12"
       DB_MAX_OVERFLOW: "8"
+      REDIS_MAX_CONNECTIONS: "80"
+      PROCESS_MAX_QUEUE: "500"
+      MAX_UPLOAD_MB: "25"
+      RATE_LIMIT_LOGIN: "30"
+      RATE_LIMIT_PROCESS: "150"
+      RATE_LIMIT_PROCESS_IP: "500"
       MAX_ROWS: "60000"
-      RATE_LIMIT_LOGIN: "20"
-      RATE_LIMIT_PROCESS: "40"
-      # development: permite demos y secretos de lab. En prod real usar production + secretos fuertes.
       APP_ENV: development
       SEED_DEMO_USERS: "true"
       ALLOW_PUBLIC_REGISTER: "true"
@@ -103,16 +104,50 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    deploy:
-      resources:
-        limits:
-          cpus: "4.0"
-          memory: 7G
-        reservations:
-          cpus: "1.0"
-          memory: 2G
-    mem_limit: 7g
-    cpus: 4.0
+    mem_limit: 2g
+    cpus: 2.0
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  # Workers de Excel — escalar: docker compose up -d --scale worker=2
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "backend.app.worker"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://fulfillpro:fulfillpro@db:5432/fulfillpro
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_ROOT: /app/storage
+      STORAGE_MAX_GB: "100"
+      # 3–4 Excel en paralelo por worker; RAM ≈ 1–1.5 GB por job típico
+      WORKER_CONCURRENCY: "3"
+      DB_POOL_SIZE: "6"
+      DB_MAX_OVERFLOW: "4"
+      REDIS_MAX_CONNECTIONS: "40"
+      MAX_ROWS: "60000"
+      MAX_UPLOAD_MB: "25"
+      APP_ENV: development
+      SEED_DEMO_USERS: "false"
+      MPLCONFIGDIR: /tmp/matplotlib
+      PYTHONPATH: /app
+    volumes:
+      - ./storage:/app/storage
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    mem_limit: 6g
+    cpus: 3.0
+    restart: unless-stopped
 
 volumes:
   pgdata:

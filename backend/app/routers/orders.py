@@ -2,14 +2,16 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.orm import Session
 
+from backend.app.config import get_settings
+from backend.app.core.rate_limit import rate_limit_user_and_ip
 from backend.app.database import get_db
 from backend.app.dependencies import get_current_user, require_consent
 from backend.app.models.user import User
 from backend.app.schemas.order import OrderListResponse, OrderOut
-from backend.app.services import order_service, storage_service
+from backend.app.services import job_queue, order_service, storage_service
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
 
@@ -22,7 +24,11 @@ async def upload_order(
     db: Session = Depends(get_db),
     user: User = Depends(require_consent),
 ):
-    content = await file.read()
+    settings = get_settings()
+    max_bytes = int(getattr(settings, "max_upload_mb", 25) or 25) * 1024 * 1024
+    content = await file.read(max_bytes + 1)
+    if len(content) > max_bytes:
+        raise HTTPException(413, f"Archivo demasiado grande (máximo {max_bytes // (1024*1024)} MB).")
     ip = request.client.host if request.client else ""
     return order_service.create_order_from_upload(
         db,
@@ -31,10 +37,11 @@ async def upload_order(
         content=content,
         license_code=license_code or None,
         ip=ip,
+        max_upload_bytes=max_bytes,
     )
 
 
-@router.post("/{order_id}/process", response_model=OrderOut)
+@router.post("/{order_id}/process")
 def process(
     order_id: UUID,
     request: Request,
@@ -42,14 +49,57 @@ def process(
     db: Session = Depends(get_db),
     user: User = Depends(require_consent),
 ):
+    """Encola reproceso (nunca ejecuta Excel en el proceso HTTP)."""
+    settings = get_settings()
+    rate_limit_user_and_ip(
+        request,
+        scope="process",
+        user_id=user.id,
+        per_user=max(int(settings.rate_limit_process or 150), 10),
+        per_ip=max(int(getattr(settings, "rate_limit_process_ip", 500) or 500), 50),
+        window=60,
+    )
     order = order_service.get_order(db, order_id, user)
+    if order.status == "processing":
+        raise HTTPException(409, "La orden ya se está procesando.")
+    if order.status == "queued":
+        return JSONResponse(
+            status_code=202,
+            content={
+                "ok": True,
+                "status": "queued",
+                "order_id": str(order.id),
+                "message": "Ya estaba en cola.",
+                "poll_url": f"/api/jobs/{order.id}",
+            },
+        )
     ip = request.client.host if request.client else ""
-    return order_service.process_order(
-        db,
-        user=user,
-        order=order,
-        license_code=license_code or None,
-        ip=ip,
+    order.status = "queued"
+    order.error_message = ""
+    db.commit()
+    try:
+        queued = job_queue.enqueue_process_job(
+            order_id=order.id,
+            user_id=user.id,
+            license_code=(license_code or "").upper().strip(),
+            ip=ip,
+            max_queue=int(getattr(settings, "process_max_queue", 500) or 500),
+        )
+    except HTTPException:
+        order.status = "failed"
+        db.commit()
+        raise
+    return JSONResponse(
+        status_code=202,
+        content={
+            "ok": True,
+            "status": "queued",
+            "order_id": str(order.id),
+            "queue_position": queued.get("queue_position"),
+            "queue_depth": queued.get("queue_depth"),
+            "poll_url": f"/api/jobs/{order.id}",
+            "download_url": f"/api/jobs/{order.id}/download",
+        },
     )
 
 

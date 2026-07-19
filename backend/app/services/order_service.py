@@ -28,13 +28,19 @@ def create_order_from_upload(
     content: bytes,
     license_code: Optional[str] = None,
     ip: str = "",
+    max_upload_bytes: Optional[int] = None,
 ) -> Order:
-    # Límite de subida (defensa en profundidad)
-    max_upload = 50 * 1024 * 1024
+    # Límite de subida (defensa en profundidad; default 25 MB para 100+ concurrentes)
+    from backend.app.config import get_settings
+
+    max_upload = max_upload_bytes or (
+        int(getattr(get_settings(), "max_upload_mb", 25) or 25) * 1024 * 1024
+    )
     if len(content) > max_upload:
-        raise HTTPException(413, "Archivo demasiado grande (máximo 50 MB).")
+        mb = max(1, max_upload // (1024 * 1024))
+        raise HTTPException(413, f"Archivo demasiado grande (máximo {mb} MB).")
     # Magic bytes básicos OOXML / OLE
-    if not (
+    if not content or not (
         content[:2] == b"PK"  # xlsx zip
         or content[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"  # xls OLE
     ):
