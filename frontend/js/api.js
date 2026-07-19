@@ -127,4 +127,20 @@ const API = {
   toggleEmployee(id) {
     return this.request(`/api/company/employees/${id}/toggle`, { method: "POST" });
   },
+  analyticsCurrent() {
+    return this.request("/api/analytics/current");
+  },
+  analyticsWeek(id) {
+    return this.request(`/api/analytics/weeks/${id}`);
+  },
+  analyticsConsolidate(id, force = false) {
+    const q = force ? "?force=true" : "";
+    return this.request(`/api/analytics/weeks/${id}/consolidate${q}`, { method: "POST" });
+  },
+  async analyticsDownload(id, format = "txt") {
+    const res = await this.request(
+      `/api/analytics/weeks/${id}/download?format=${encodeURIComponent(format)}`
+    );
+    return res; // Response with blob body
+  },
 };

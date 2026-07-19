@@ -15,7 +15,7 @@ from backend.app.database import Base, SessionLocal, engine
 from backend.app.models import *  # noqa: F401,F403
 from backend.app.models.license import License
 from backend.app.models.user import User
-from backend.app.routers import admin, auth, company, health, legal, licenses, orders, process
+from backend.app.routers import admin, analytics, auth, company, health, legal, licenses, orders, process
 from backend.app.services import legal_service, license_service, storage_service
 
 settings = get_settings()
@@ -43,6 +43,7 @@ app.include_router(process.router)
 app.include_router(admin.router)
 app.include_router(legal.router)
 app.include_router(company.router)
+app.include_router(analytics.router)
 
 
 def _safe_alter(sql: str) -> None:
@@ -59,6 +60,20 @@ def ensure_schema() -> None:
     _safe_alter("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_accept_terms BOOLEAN DEFAULT TRUE")
     _safe_alter("ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMP")
     _safe_alter("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_by_id VARCHAR(36)")
+    _safe_alter("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS analytics_enabled BOOLEAN DEFAULT TRUE")
+    _safe_alter(
+        "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS analytics_weeks_retention INTEGER DEFAULT 12"
+    )
+    _safe_alter(
+        "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS analytics_max_events_per_week INTEGER DEFAULT 50000"
+    )
+    _safe_alter(
+        "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS analytics_storage_mb INTEGER DEFAULT 200"
+    )
+    # Quitar FK de source_order_id si existía (analítica no depende del ciclo de vida de orders)
+    _safe_alter(
+        "ALTER TABLE analytics_sale_events DROP CONSTRAINT IF EXISTS analytics_sale_events_source_order_id_fkey"
+    )
 
 
 def seed_database() -> None:

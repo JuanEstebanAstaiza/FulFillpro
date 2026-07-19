@@ -17,6 +17,7 @@ from backend.app.services.license_service import (
     company_brand,
     consume_quota,
 )
+from backend.app.services import analytics_service
 
 
 def create_order_from_upload(
@@ -171,6 +172,36 @@ def process_order(
         order.counted_toward_quota = counted
         db.commit()
         db.refresh(order)
+
+        # Analítica semanal de más vendidos (dedup de órdenes)
+        try:
+            analytics_meta = analytics_service.ingest_order_rows(
+                db,
+                user=user,
+                lic=lic,
+                source_order_id=order.id,
+                rows=rows,
+            )
+            meta = dict(order.meta or {})
+            meta["analytics"] = analytics_meta
+            order.meta = meta
+            db.commit()
+            db.refresh(order)
+        except HTTPException:
+            raise
+        except Exception as ae:
+            # No tumbar el proceso de Excel por fallo de analítica
+            log_security(
+                db,
+                title="Analítica no ingerida",
+                detail=str(ae),
+                severity="warning",
+                category="operational",
+                user_id=user.id,
+                license_code=lic.code if lic else "",
+                ip=ip,
+                meta={"order_id": str(order.id)},
+            )
 
         log_access(
             db,

@@ -4,6 +4,11 @@ from backend.app.models.device import Device
 from backend.app.models.order import Order, OrderFile
 from backend.app.models.audit import AccessLog, SecurityEvent
 from backend.app.models.legal import LegalDocument, UserConsent
+from backend.app.models.analytics import (
+    AnalyticsWeek,
+    AnalyticsSaleEvent,
+    AnalyticsConsolidation,
+)
 
 __all__ = [
     "User",
@@ -15,4 +20,7 @@ __all__ = [
     "SecurityEvent",
     "LegalDocument",
     "UserConsent",
+    "AnalyticsWeek",
+    "AnalyticsSaleEvent",
+    "AnalyticsConsolidation",
 ]

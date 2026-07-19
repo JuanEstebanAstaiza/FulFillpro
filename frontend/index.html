@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/css/app.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -153,6 +154,9 @@
         <button type="button" class="nav-item hidden" id="nav-team" data-view="team">
           <span class="ico">◎</span> Equipo
         </button>
+        <button type="button" class="nav-item hidden" id="nav-analytics" data-view="analytics">
+          <span class="ico">◉</span> Más vendidos
+        </button>
       </nav>
       <div class="sidebar-foot">
         <div class="user-chip">
@@ -245,6 +249,88 @@
               </thead>
               <tbody id="orders-body"></tbody>
             </table>
+          </div>
+        </section>
+
+        <section id="view-analytics" class="view hidden">
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h2>Productos más vendidos</h2>
+                <p class="lead" style="margin:0">
+                  Ciclo de 7 días desde la primera subida de la semana. Las órdenes repetidas en
+                  varios Excel <strong>no se cuentan dos veces</strong>.
+                </p>
+              </div>
+              <button type="button" class="btn btn-ghost btn-sm" id="btn-analytics-refresh">Actualizar</button>
+            </div>
+            <div id="analytics-week-meta" class="stats" style="margin-bottom:1rem"></div>
+            <div id="analytics-banner" class="warning-item hidden" style="margin-bottom:1rem"></div>
+            <div class="grid-2">
+              <div>
+                <h3 style="margin-bottom:0.75rem">Unidades (tiempo real)</h3>
+                <div class="chart-wrap"><canvas id="chart-units" height="220"></canvas></div>
+              </div>
+              <div>
+                <h3 style="margin-bottom:0.75rem">Líneas de pedido (tiempo real)</h3>
+                <div class="chart-wrap"><canvas id="chart-lines" height="220"></canvas></div>
+              </div>
+            </div>
+            <div style="margin-top:1.25rem;display:flex;gap:0.6rem;flex-wrap:wrap;align-items:center">
+              <button type="button" class="btn btn-primary hidden" id="btn-consolidate">
+                Generar consolidado
+              </button>
+              <span id="consolidate-hint" class="hint"></span>
+            </div>
+            <div id="early-warning-box" class="warning-item hidden" style="margin-top:0.85rem"></div>
+          </div>
+          <div class="card">
+            <h2>Ranking de la semana</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Producto</th>
+                  <th>Variación</th>
+                  <th>Unidades</th>
+                  <th>Líneas únicas</th>
+                </tr>
+              </thead>
+              <tbody id="analytics-rank-body"></tbody>
+            </table>
+          </div>
+          <div class="card">
+            <h2>Historial de semanas</h2>
+            <p class="lead">Al cerrar el ciclo, el contador se reinicia con la próxima subida de Excel. Descarga el consolidado cuando quieras.</p>
+            <div id="analytics-storage" class="hint" style="margin-bottom:0.75rem"></div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Inicio</th>
+                  <th>Fin</th>
+                  <th>Estado</th>
+                  <th>Unidades</th>
+                  <th>Archivos</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="analytics-weeks-body"></tbody>
+            </table>
+          </div>
+          <!-- Vista del último consolidado -->
+          <div id="consolidado-viewer" class="card hidden">
+            <div class="card-head">
+              <div>
+                <h2>Consolidado generado</h2>
+                <p class="lead" style="margin:0" id="consolidado-viewer-meta"></p>
+              </div>
+              <div class="row-actions">
+                <button type="button" class="btn btn-sm btn-primary" id="btn-dl-pdf">Descargar PDF</button>
+                <button type="button" class="btn btn-sm btn-ghost" id="btn-dl-json">Descargar .json</button>
+                <button type="button" class="btn btn-sm btn-ghost" id="btn-close-viewer">Cerrar</button>
+              </div>
+            </div>
+            <div id="consolidado-viewer-body" class="consolidado-summary"></div>
           </div>
         </section>
 

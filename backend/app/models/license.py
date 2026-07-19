@@ -52,6 +52,15 @@ class License(Base):
     count_toward_global = Column(Boolean, default=True)  # False = no descuenta del cupo global
     enforce_daily_limit = Column(Boolean, default=True)
 
+    # Analítica de productos más vendidos
+    analytics_enabled = Column(Boolean, default=True)
+    # Semanas de historial a conservar (consolidados + eventos)
+    analytics_weeks_retention = Column(Integer, default=12)
+    # Máx. líneas únicas (eventos) por semana de analítica
+    analytics_max_events_per_week = Column(Integer, default=50000)
+    # Tope de almacenamiento de analítica en MB por empresa (0 = sin tope duro extra)
+    analytics_storage_mb = Column(Integer, default=200)
+
     # features: dict libre para reglas futuras
     features = Column(JSON().with_variant(JSONB(), "postgresql"), default=dict)
 

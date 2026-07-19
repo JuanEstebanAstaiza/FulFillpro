@@ -30,6 +30,10 @@ TEMPLATES: dict[str, dict[str, Any]] = {
         "duration_days": 7,
         "count_toward_global": True,
         "enforce_daily_limit": True,
+        "analytics_enabled": True,
+        "analytics_weeks_retention": 4,
+        "analytics_max_events_per_week": 5000,
+        "analytics_storage_mb": 50,
     },
     "standard": {
         "type": "standard",
@@ -40,6 +44,10 @@ TEMPLATES: dict[str, dict[str, Any]] = {
         "duration_days": 30,
         "count_toward_global": True,
         "enforce_daily_limit": True,
+        "analytics_enabled": True,
+        "analytics_weeks_retention": 12,
+        "analytics_max_events_per_week": 30000,
+        "analytics_storage_mb": 200,
     },
     "pro": {
         "type": "pro",
@@ -50,6 +58,10 @@ TEMPLATES: dict[str, dict[str, Any]] = {
         "duration_days": 365,
         "count_toward_global": True,
         "enforce_daily_limit": True,
+        "analytics_enabled": True,
+        "analytics_weeks_retention": 26,
+        "analytics_max_events_per_week": 100000,
+        "analytics_storage_mb": 500,
     },
     "enterprise": {
         "type": "enterprise",
@@ -60,6 +72,10 @@ TEMPLATES: dict[str, dict[str, Any]] = {
         "duration_days": 365,
         "count_toward_global": True,
         "enforce_daily_limit": False,
+        "analytics_enabled": True,
+        "analytics_weeks_retention": 52,
+        "analytics_max_events_per_week": 500000,
+        "analytics_storage_mb": 2000,
     },
 }
 
@@ -129,6 +145,12 @@ def license_to_dict(db: Session, lic: License, include_devices: bool = True) -> 
         "enforce_daily_limit": lic.enforce_daily_limit,
         "features": lic.features or {},
         "notes": lic.notes or "",
+        "analytics_enabled": bool(getattr(lic, "analytics_enabled", True)),
+        "analytics_weeks_retention": int(getattr(lic, "analytics_weeks_retention", 12) or 12),
+        "analytics_max_events_per_week": int(
+            getattr(lic, "analytics_max_events_per_week", 50000) or 50000
+        ),
+        "analytics_storage_mb": int(getattr(lic, "analytics_storage_mb", 200) or 200),
         "devices_count": sum(1 for d in lic.devices if d.is_active),
         "devices": devices,
         "created_at": lic.created_at,
@@ -171,6 +193,10 @@ def create_license(db: Session, data: dict) -> License:
         uses=0,
         expiry=expiry,
         active=True,
+        analytics_enabled=bool(payload.get("analytics_enabled", True)),
+        analytics_weeks_retention=int(payload.get("analytics_weeks_retention") or 12),
+        analytics_max_events_per_week=int(payload.get("analytics_max_events_per_week") or 50000),
+        analytics_storage_mb=int(payload.get("analytics_storage_mb") or 200),
         count_toward_global=payload.get("count_toward_global", True),
         enforce_daily_limit=payload.get("enforce_daily_limit", True),
         features=payload.get("features") or {},
