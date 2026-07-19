@@ -8,6 +8,25 @@ from backend.app.config import get_settings
 from backend.app.services.excel.reader import parse_date
 
 
+def _clean_var(value: Any) -> str:
+    v = str(value or "").strip()
+    if not v or v.lower() in {"nan", "none", "null", "-"}:
+        return ""
+    return v
+
+
+def product_with_variation(row: dict[str, Any]) -> str:
+    """
+    Nombre de producto para mostrar, incluyendo variables (talla, color, etc.)
+    cuando existen. Ej: "Camiseta Básica [XL / Negro]"
+    """
+    nombre = str(row.get("producto") or "").strip()
+    var = _clean_var(row.get("variacion"))
+    if var:
+        return f"{nombre} [{var}]"
+    return nombre
+
+
 def process_rows(rows: list[dict[str, Any]], today: date) -> tuple:
     """Fases 4–13 de la especificación. Retorna resumen, cant_max, reporte, prior, total_riesgo."""
     settings = get_settings()
@@ -27,12 +46,17 @@ def process_rows(rows: list[dict[str, Any]], today: date) -> tuple:
         if guia in combo_guias:
             id_final = f"COMP-{guia}"
             cant_res = 1
-            nombre = " + ".join(f"{r['producto']} ({r['cantidad']})" for r in items)
+            # Incluir talla/color/etc. en cada línea del combo para alistamiento en bodega
+            nombre = " + ".join(
+                f"{product_with_variation(r)} ({r['cantidad']})" for r in items
+            )
         else:
             r = items[0]
-            var = r["variacion"]
-            id_final = f"{r['id']}|{var}" if var and var not in ("nan", "") else r["id"]
+            var = _clean_var(r.get("variacion"))
+            id_final = f"{r['id']}|{var}" if var else r["id"]
             cant_res = max(r["cantidad"], 1)
+            # En filas normales la variación va en columna VARIABLES;
+            # el nombre se mantiene limpio (spec). Opcional: también enriquecer.
             nombre = r["producto"]
 
         cant_res = min(cant_res, settings.max_cant_cols)
