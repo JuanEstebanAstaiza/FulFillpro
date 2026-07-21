@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
+from starlette.background import BackgroundTask
 
 from backend.app.database import get_db
 from backend.app.dependencies import require_admin
@@ -17,8 +21,8 @@ from backend.app.models.order import Order
 from backend.app.models.user import User
 from backend.app.schemas.auth import UserOut
 from backend.app.schemas.license import LicenseCreate, LicenseOut, LicenseUpdate
-from backend.app.services import license_service
-from backend.app.services.audit_service import log_access
+from backend.app.services import backup_service, license_service
+from backend.app.services.audit_service import log_access, log_security
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -555,3 +559,147 @@ def resolve_incident(
         user_id=admin.id,
     )
     return {"ok": True}
+
+
+# ── Backup / restore (owners plataforma) ───────────────────
+
+
+def _unlink_quiet(path: str) -> None:
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+@router.get("/backup/info")
+def backup_info(
+    include_storage: bool = Query(True),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    """Estimación de tamaño y filas antes de generar el backup."""
+    return backup_service.estimate_backup(db, include_storage=include_storage)
+
+
+@router.post("/backup/download")
+def backup_download(
+    request: Request,
+    include_storage: bool = Query(True, description="Incluir archivos Excel del storage"),
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """
+    Genera y descarga un ZIP de emergencia (BD + storage opcional).
+    Solo platform admin.
+    """
+    try:
+        path, meta = backup_service.create_backup_zip(
+            db,
+            include_storage=include_storage,
+            created_by=admin.email,
+        )
+    except Exception as e:
+        raise HTTPException(500, f"No se pudo generar el backup: {e}") from e
+
+    stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    filename = f"fulfillpro-backup-{stamp}.zip"
+    ip = request.client.host if request.client else ""
+    log_access(
+        db,
+        event_type="admin_backup",
+        detail=(
+            f"Backup descargado · rows={meta.get('total_rows')} · "
+            f"storage={'sí' if include_storage else 'no'} · "
+            f"{meta.get('archive_mb', '?')} MB"
+        ),
+        user_id=admin.id,
+        ip=ip,
+    )
+    log_security(
+        db,
+        title="Backup de plataforma descargado",
+        detail=f"Por {admin.email} · {filename} · storage={include_storage}",
+        severity="info",
+        category="operational",
+        user_id=admin.id,
+        ip=ip,
+        meta={"include_storage": include_storage, "archive_mb": meta.get("archive_mb")},
+    )
+
+    return FileResponse(
+        path,
+        filename=filename,
+        media_type="application/zip",
+        background=BackgroundTask(_unlink_quiet, str(path)),
+        headers={
+            "X-Backup-Rows": str(meta.get("total_rows") or 0),
+            "Access-Control-Expose-Headers": "Content-Disposition, X-Backup-Rows",
+        },
+    )
+
+
+@router.post("/backup/restore")
+async def backup_restore(
+    request: Request,
+    file: UploadFile = File(...),
+    confirm_phrase: str = Form(...),
+    include_storage: str = Form("true"),
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """
+    Restaura un backup ZIP de emergencia.
+    Requiere confirm_phrase = RESTAURAR (mayúsculas).
+    """
+    if not file.filename or not file.filename.lower().endswith(".zip"):
+        raise HTTPException(400, "Debes subir un archivo .zip de backup FulfillPro.")
+
+    do_storage = str(include_storage).lower() in {"1", "true", "yes", "on"}
+    ip = request.client.host if request.client else ""
+    tmp_path: Optional[Path] = None
+    try:
+        tmp_path = await backup_service.save_upload_to_temp(file)
+        peek = backup_service.peek_backup_zip(tmp_path)
+        result = backup_service.restore_backup_zip(
+            db,
+            tmp_path,
+            confirm_phrase=confirm_phrase,
+            include_storage=do_storage,
+            created_by=admin.email,
+        )
+        # Tras restore, el admin puede haber cambiado; loguear en nueva sesión DB
+        try:
+            log_security(
+                db,
+                title="Restauración de backup ejecutada",
+                detail=(
+                    f"Por {admin.email} · source={peek.get('created_at')} · "
+                    f"rows={result.get('total_rows')} · storage_files={result.get('storage_files_restored')}"
+                ),
+                severity="critical",
+                category="operational",
+                user_id=admin.id,
+                ip=ip,
+                meta=result,
+            )
+        except Exception:
+            pass
+        return result
+    finally:
+        if tmp_path is not None:
+            _unlink_quiet(str(tmp_path))
+
+
+@router.post("/backup/inspect")
+async def backup_inspect(
+    file: UploadFile = File(...),
+    _: User = Depends(require_admin),
+):
+    """Inspecciona un ZIP de backup sin restaurarlo."""
+    if not file.filename or not file.filename.lower().endswith(".zip"):
+        raise HTTPException(400, "Debes subir un archivo .zip.")
+    tmp_path = await backup_service.save_upload_to_temp(file)
+    try:
+        return backup_service.peek_backup_zip(tmp_path)
+    finally:
+        _unlink_quiet(str(tmp_path))

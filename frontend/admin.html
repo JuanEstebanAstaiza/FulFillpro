@@ -24,6 +24,7 @@
         <button class="tab nav-item" data-tab="users" type="button"><span class="ico">◎</span> Usuarios</button>
         <button class="tab nav-item" data-tab="logs" type="button"><span class="ico">☰</span> Logs</button>
         <button class="tab nav-item" data-tab="incidents" type="button"><span class="ico">!</span> Incidentes</button>
+        <button class="tab nav-item" data-tab="backup" type="button"><span class="ico">⬇</span> Backup</button>
       </nav>
       <div class="sidebar-foot">
         <div class="user-chip">
@@ -205,6 +206,59 @@
             </thead>
             <tbody id="incidents-body"></tbody>
           </table>
+        </section>
+
+        <section data-panel="backup" class="hidden">
+          <div class="card">
+            <h2>Backup de plataforma</h2>
+            <p class="lead">
+              Exporta un ZIP de emergencia con base de datos (usuarios, licencias, órdenes, analítica, logs)
+              y opcionalmente los archivos Excel del storage. Solo owners de FulfillPro.
+            </p>
+            <div id="backup-info" class="stats" style="margin-bottom:1rem"></div>
+            <div class="field">
+              <label>
+                <input id="backup-include-storage" type="checkbox" checked style="width:auto;margin-right:0.4rem" />
+                Incluir archivos de storage (Excel input/output, consolidados)
+              </label>
+              <div class="hint">Sin storage el ZIP es más liviano (solo metadatos y BD).</div>
+            </div>
+            <div class="row-actions" style="gap:0.6rem;flex-wrap:wrap">
+              <button id="btn-backup-refresh" class="btn btn-ghost" type="button">Actualizar estimación</button>
+              <button id="btn-backup-download" class="btn btn-primary" type="button">Descargar backup ZIP</button>
+            </div>
+            <p id="backup-download-status" class="hint" style="margin-top:0.75rem"></p>
+          </div>
+
+          <div class="card" style="border-color:rgba(220,38,38,.35);margin-top:1rem">
+            <h2 style="color:#b91c1c">Restaurar (emergencia)</h2>
+            <p class="lead">
+              <strong>Operación destructiva.</strong> Reemplaza los datos actuales de la plataforma
+              por el contenido del ZIP. Se intenta guardar un snapshot pre-restore (solo BD) en
+              <code>storage/.backups/</code>. Tras restaurar, cierra sesión y vuelve a entrar.
+            </p>
+            <div class="field">
+              <label for="restore-file">Archivo .zip de backup</label>
+              <input id="restore-file" type="file" accept=".zip,application/zip" />
+            </div>
+            <div class="field">
+              <label>
+                <input id="restore-include-storage" type="checkbox" checked style="width:auto;margin-right:0.4rem" />
+                Restaurar también storage (si el ZIP lo incluye)
+              </label>
+            </div>
+            <div class="field">
+              <label for="restore-phrase">Escribe <strong>RESTAURAR</strong> para confirmar</label>
+              <input id="restore-phrase" class="mono" placeholder="RESTAURAR" autocomplete="off" />
+            </div>
+            <div class="row-actions" style="gap:0.6rem;flex-wrap:wrap">
+              <button id="btn-backup-inspect" class="btn btn-ghost" type="button">Inspeccionar ZIP</button>
+              <button id="btn-backup-restore" class="btn btn-primary" type="button" style="background:linear-gradient(135deg,#b91c1c,#7f1d1d)">
+                Ejecutar restauración
+              </button>
+            </div>
+            <pre id="backup-restore-result" class="mono" style="margin-top:1rem;white-space:pre-wrap;font-size:0.82rem;max-height:240px;overflow:auto"></pre>
+          </div>
         </section>
       </div>
     </div>

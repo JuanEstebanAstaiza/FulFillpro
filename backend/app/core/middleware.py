@@ -20,7 +20,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
         response.headers.setdefault("X-XSS-Protection", "0")  # confiar en CSP moderna
 
-        # CSP: SPA propia + Chart.js CDN (self-host ideal a futuro)
+        # CSP: solo scripts externos (sin unsafe-inline / onclick).
+        # Chart.js CDN + JS propios en /js/*.js
         csp = (
             "default-src 'self'; "
             "script-src 'self' https://cdn.jsdelivr.net; "
@@ -30,7 +31,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "connect-src 'self'; "
             "frame-ancestors 'none'; "
             "base-uri 'self'; "
-            "form-action 'self'"
+            "form-action 'self'; "
+            "object-src 'none'"
         )
         response.headers.setdefault("Content-Security-Policy", csp)
 

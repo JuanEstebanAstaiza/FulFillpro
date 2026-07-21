@@ -578,8 +578,12 @@ async function loadHistory() {
         const co = (o.meta && o.meta.company_name) || o.client_code || "—";
         const dl =
           o.status === "completed"
-            ? `<button class="btn btn-sm btn-ghost" type="button" onclick="dlAuth('${o.id}','output')">Salida</button>
-               <button class="btn btn-sm btn-ghost" type="button" onclick="dlAuth('${o.id}','input')">Entrada</button>`
+            ? `<button class="btn btn-sm btn-ghost" type="button" data-action="dl-auth" data-id="${escapeHtml(
+                o.id
+              )}" data-kind="output">Salida</button>
+               <button class="btn btn-sm btn-ghost" type="button" data-action="dl-auth" data-id="${escapeHtml(
+                 o.id
+               )}" data-kind="input">Entrada</button>`
             : "—";
         return `<tr>
           <td class="mono">${String(o.id).slice(0, 8)}…</td>
@@ -618,7 +622,9 @@ async function loadTeam() {
           <td><span class="badge ${u.is_active ? "badge-ok" : "badge-err"}">${
             u.is_active ? "activo" : "off"
           }</span></td>
-          <td><button class="btn btn-sm btn-ghost" type="button" onclick="toggleEmp('${u.id}')">Toggle</button></td>
+          <td><button class="btn btn-sm btn-ghost" type="button" data-action="toggle-emp" data-id="${escapeHtml(
+            u.id
+          )}">Toggle</button></td>
         </tr>`;
       })
       .join("");
@@ -854,9 +860,15 @@ async function loadAnalytics() {
             : "";
           const dl =
             w.has_consolidation || w.status === "consolidated"
-              ? `<button class="btn btn-sm btn-primary" type="button" onclick="downloadConsolidation('${w.id}','pdf')">PDF</button>
-                 <button class="btn btn-sm btn-ghost" type="button" onclick="openConsolidadoViewer('${w.id}')">Ver</button>`
-              : `<button class="btn btn-sm btn-ghost" type="button" onclick="viewWeek('${w.id}')">Ver ranking</button>`;
+              ? `<button class="btn btn-sm btn-primary" type="button" data-action="dl-consolidado" data-id="${escapeHtml(
+                  w.id
+                )}" data-format="pdf">PDF</button>
+                 <button class="btn btn-sm btn-ghost" type="button" data-action="view-consolidado" data-id="${escapeHtml(
+                   w.id
+                 )}">Ver</button>`
+              : `<button class="btn btn-sm btn-ghost" type="button" data-action="view-week" data-id="${escapeHtml(
+                  w.id
+                )}">Ver ranking</button>`;
           return `<tr>
             <td class="muted">${w.started_at ? new Date(w.started_at).toLocaleString() : "—"}</td>
             <td class="muted">${w.ends_at ? new Date(w.ends_at).toLocaleString() : "—"}</td>
@@ -1083,10 +1095,6 @@ async function viewWeek(id) {
   await openConsolidadoViewer(id);
 }
 
-window.viewWeek = viewWeek;
-window.downloadConsolidation = downloadConsolidation;
-window.openConsolidadoViewer = openConsolidadoViewer;
-
 async function onCreateEmployee(e) {
   e.preventDefault();
   hideAlert($("#global-alert"));
@@ -1127,6 +1135,30 @@ async function dlAuth(orderId, kind) {
   }
 }
 
-window.dlAuth = dlAuth;
-window.toggleEmp = toggleEmp;
+/** Delegación de eventos: sin onclick inline (CSP script-src 'self'). */
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-action]");
+  if (!btn) return;
+  const action = btn.dataset.action;
+  const id = btn.dataset.id;
+  if (!action) return;
+
+  if (action === "dl-auth") {
+    e.preventDefault();
+    dlAuth(id, btn.dataset.kind || "output");
+  } else if (action === "toggle-emp") {
+    e.preventDefault();
+    toggleEmp(id);
+  } else if (action === "dl-consolidado") {
+    e.preventDefault();
+    downloadConsolidation(id, btn.dataset.format || "pdf");
+  } else if (action === "view-consolidado") {
+    e.preventDefault();
+    openConsolidadoViewer(id);
+  } else if (action === "view-week") {
+    e.preventDefault();
+    viewWeek(id);
+  }
+});
+
 init();

@@ -34,6 +34,19 @@ async function init() {
   $("#template").addEventListener("change", applyTemplateHints);
   applyTemplateHints();
 
+  $("#btn-backup-refresh")?.addEventListener("click", () => loadBackupInfo());
+  $("#btn-backup-download")?.addEventListener("click", downloadBackup);
+  $("#btn-backup-inspect")?.addEventListener("click", inspectBackup);
+  $("#btn-backup-restore")?.addEventListener("click", restoreBackup);
+  $("#backup-include-storage")?.addEventListener("change", () => loadBackupInfo());
+
+  // Cargar estimación al abrir pestaña backup
+  $$(".tab[data-tab]").forEach((t) =>
+    t.addEventListener("click", () => {
+      if (t.dataset.tab === "backup") loadBackupInfo();
+    })
+  );
+
   await Promise.all([
     loadOverview(),
     loadCompanyUsage(),
@@ -42,6 +55,153 @@ async function init() {
     loadLogs(),
     loadIncidents(),
   ]);
+}
+
+function showAdminAlert(message, type = "error") {
+  const el = $("#admin-alert");
+  if (!el) return;
+  el.className = `alert alert-${type === "ok" ? "ok" : type === "info" ? "info" : "error"}`;
+  el.textContent = message;
+  el.classList.remove("hidden");
+}
+
+function fmtBytes(n) {
+  const b = Number(n) || 0;
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+  if (b < 1024 * 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(b / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+async function loadBackupInfo() {
+  const box = $("#backup-info");
+  if (!box) return;
+  const include = $("#backup-include-storage")?.checked !== false;
+  try {
+    const d = await API.request(`/api/admin/backup/info?include_storage=${include ? "true" : "false"}`);
+    const counts = d.table_counts || {};
+    const topTables = Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join(" · ");
+    box.innerHTML = `
+      <div class="stat"><div class="label">Filas BD</div><div class="value">${d.total_rows || 0}</div></div>
+      <div class="stat"><div class="label">Archivos storage</div><div class="value">${include ? d.storage_files || 0 : "—"}</div>
+        <div class="hint">${include ? fmtBytes(d.storage_bytes) : "omitido"}</div></div>
+      <div class="stat"><div class="label">Storage estimado</div><div class="value">${include ? (d.storage_mb || 0) + " MB" : "0"}</div></div>
+      <div class="stat"><div class="label">Formato</div><div class="value">v${d.format_version || 1}</div>
+        <div class="hint">${escape(topTables || "sin datos")}</div></div>
+    `;
+    if (d.warning) {
+      showAdminAlert(d.warning, "info");
+    }
+  } catch (err) {
+    box.innerHTML = `<p class="muted">${escape(err.message)}</p>`;
+  }
+}
+
+async function downloadBackup() {
+  const btn = $("#btn-backup-download");
+  const status = $("#backup-download-status");
+  const include = $("#backup-include-storage")?.checked !== false;
+  if (btn) btn.disabled = true;
+  if (status) status.textContent = "Generando backup… puede tardar si hay muchos archivos.";
+  try {
+    const res = await fetch(`/api/admin/backup/download?include_storage=${include ? "true" : "false"}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${API.token}` },
+    });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const j = await res.json();
+        detail = j.detail || detail;
+      } catch {
+        /* ignore */
+      }
+      throw new Error(detail || "Error al generar backup");
+    }
+    const blob = await res.blob();
+    const dispo = res.headers.get("Content-Disposition") || "";
+    const m = /filename="?([^";]+)"?/i.exec(dispo);
+    const name = m ? m[1] : `fulfillpro-backup-${Date.now()}.zip`;
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    if (status) status.textContent = `Descargado: ${name} (${fmtBytes(blob.size)})`;
+    showAdminAlert(`Backup descargado: ${name}`, "ok");
+  } catch (err) {
+    if (status) status.textContent = "";
+    showAdminAlert(err.message || "Error en backup");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function inspectBackup() {
+  const input = $("#restore-file");
+  const out = $("#backup-restore-result");
+  if (!input?.files?.length) {
+    showAdminAlert("Selecciona un archivo .zip primero.");
+    return;
+  }
+  const fd = new FormData();
+  fd.append("file", input.files[0]);
+  try {
+    const data = await API.request("/api/admin/backup/inspect", { method: "POST", body: fd });
+    if (out) out.textContent = JSON.stringify(data, null, 2);
+    showAdminAlert(
+      `ZIP válido · filas≈${data.total_rows ?? "?"} · storage entries=${data.storage_entries ?? 0}`,
+      "ok"
+    );
+  } catch (err) {
+    if (out) out.textContent = err.message;
+    showAdminAlert(err.message);
+  }
+}
+
+async function restoreBackup() {
+  const input = $("#restore-file");
+  const phrase = ($("#restore-phrase")?.value || "").trim();
+  const out = $("#backup-restore-result");
+  const btn = $("#btn-backup-restore");
+  if (!input?.files?.length) {
+    showAdminAlert("Selecciona un archivo .zip de backup.");
+    return;
+  }
+  if (phrase.toUpperCase() !== "RESTAURAR") {
+    showAdminAlert('Debes escribir exactamente RESTAURAR en el campo de confirmación.');
+    return;
+  }
+  if (
+    !confirm(
+      "¿Seguro? Esto REEMPLAZA los datos actuales de la plataforma. No se puede deshacer fácilmente."
+    )
+  ) {
+    return;
+  }
+  if (btn) btn.disabled = true;
+  if (out) out.textContent = "Restaurando… no cierres esta ventana.";
+  try {
+    const fd = new FormData();
+    fd.append("file", input.files[0]);
+    fd.append("confirm_phrase", phrase);
+    fd.append(
+      "include_storage",
+      $("#restore-include-storage")?.checked !== false ? "true" : "false"
+    );
+    const data = await API.request("/api/admin/backup/restore", { method: "POST", body: fd });
+    if (out) out.textContent = JSON.stringify(data, null, 2);
+    showAdminAlert(data.message || "Restauración completada. Cierra sesión y vuelve a entrar.", "ok");
+  } catch (err) {
+    if (out) out.textContent = err.message;
+    showAdminAlert(err.message);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 function fmtDate(iso) {
@@ -139,9 +299,9 @@ async function loadLicenses() {
         <td>${l.expiry || "—"} (${l.days_left == null ? "∞" : l.days_left + "d"})</td>
         <td><span class="badge ${l.active ? "badge-ok" : "badge-err"}">${l.active ? "activa" : "off"}</span></td>
         <td class="row-actions">
-          <button class="btn btn-sm btn-ghost" onclick="toggleLic('${l.id}')">Toggle</button>
-          <button class="btn btn-sm btn-ghost" onclick="resetUses('${l.id}')">Reset usos</button>
-          <button class="btn btn-sm btn-ghost" onclick="renewLic('${l.id}')">+30d</button>
+          <button class="btn btn-sm btn-ghost" type="button" data-action="toggle-lic" data-id="${escape(l.id)}">Toggle</button>
+          <button class="btn btn-sm btn-ghost" type="button" data-action="reset-uses" data-id="${escape(l.id)}">Reset usos</button>
+          <button class="btn btn-sm btn-ghost" type="button" data-action="renew-lic" data-id="${escape(l.id)}">+30d</button>
         </td>
       </tr>`;
     })
@@ -159,7 +319,7 @@ async function loadUsers() {
       <td class="mono">${escape(u.client_code)}</td>
       <td>${escape(u.company_name || "—")}</td>
       <td><span class="badge ${u.is_active ? "badge-ok" : "badge-err"}">${u.is_active ? "activo" : "off"}</span></td>
-      <td><button class="btn btn-sm btn-ghost" onclick="toggleUser('${u.id}')">Toggle</button></td>
+      <td><button class="btn btn-sm btn-ghost" type="button" data-action="toggle-user" data-id="${escape(u.id)}">Toggle</button></td>
     </tr>`
     )
     .join("");
@@ -193,7 +353,7 @@ async function loadIncidents() {
       <td>${
         r.resolved
           ? "✓"
-          : `<button class="btn btn-sm btn-primary" onclick="resolveInc(${r.id})">Resolver</button>`
+          : `<button class="btn btn-sm btn-primary" type="button" data-action="resolve-inc" data-id="${r.id}">Resolver</button>`
       }</td>
     </tr>`
     )
@@ -279,10 +439,30 @@ function escape(s) {
     .replace(/>/g, "&gt;");
 }
 
-window.toggleLic = toggleLic;
-window.resetUses = resetUses;
-window.renewLic = renewLic;
-window.toggleUser = toggleUser;
-window.resolveInc = resolveInc;
+/** Delegación de eventos: sin onclick inline (CSP script-src 'self'). */
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-action]");
+  if (!btn) return;
+  const action = btn.dataset.action;
+  const id = btn.dataset.id;
+  if (!action) return;
+
+  if (action === "toggle-lic") {
+    e.preventDefault();
+    toggleLic(id);
+  } else if (action === "reset-uses") {
+    e.preventDefault();
+    resetUses(id);
+  } else if (action === "renew-lic") {
+    e.preventDefault();
+    renewLic(id);
+  } else if (action === "toggle-user") {
+    e.preventDefault();
+    toggleUser(id);
+  } else if (action === "resolve-inc") {
+    e.preventDefault();
+    resolveInc(id);
+  }
+});
 
 init();

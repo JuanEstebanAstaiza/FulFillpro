@@ -30,24 +30,6 @@
     </div>
   </div>
   <script src="/js/api.js"></script>
-  <script>
-    document.getElementById("ops-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const alert = document.getElementById("ops-alert");
-      alert.classList.add("hidden");
-      try {
-        const tokens = await API.loginPlatform(
-          document.getElementById("email").value.trim(),
-          document.getElementById("password").value
-        );
-        API.setTokens(tokens.access_token, tokens.refresh_token);
-        window.location.href = "/ops/panel";
-      } catch (err) {
-        alert.className = "alert alert-error";
-        alert.textContent = err.message || "Error";
-        alert.classList.remove("hidden");
-      }
-    });
-  </script>
+  <script src="/js/ops.js"></script>
 </body>
 </html>
