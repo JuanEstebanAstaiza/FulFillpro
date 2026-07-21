@@ -19,6 +19,12 @@ cp .env.example .env
 docker compose up --build
 ```
 
+## Despliegue en servidor (Proxmox + Debian + Cloudflared)
+
+Instructivo completo para VM local, Docker en producción y publicación HTTPS con dominio propio (sin abrir puertos):
+
+→ [`Documentacion/Instructivo_Despliegue_Proxmox_Docker_Cloudflared.md`](Documentacion/Instructivo_Despliegue_Proxmox_Docker_Cloudflared.md)
+
 - App empresas: http://localhost:8000  
 - **Ops (login oculto plataforma):** http://localhost:8000/ops  
 - API docs: http://localhost:8000/api/docs  
