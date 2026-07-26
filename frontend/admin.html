@@ -140,6 +140,10 @@
           </div>
           <div class="card">
             <h2>Licencias</h2>
+            <p class="lead">
+              Puedes <strong>editar o cambiar el plan</strong> de una licencia activa (p. ej. mensual → anual)
+              sin crear un código nuevo ni desactivar la anterior. La empresa sigue con el mismo código.
+            </p>
             <table>
               <thead>
                 <tr>
@@ -156,6 +160,102 @@
             </table>
           </div>
         </section>
+
+        <!-- Modal editar / cambiar plan (CSP: sin scripts inline) -->
+        <div id="lic-edit-overlay" class="legal-overlay hidden" aria-hidden="true">
+          <div class="legal-panel" style="max-width:640px">
+            <div class="legal-header">
+              <h2 style="margin:0">Editar / cambiar plan</h2>
+              <button type="button" class="btn btn-ghost btn-sm" id="lic-edit-close" data-action="close-lic-edit">Cerrar</button>
+            </div>
+            <p class="lead" style="margin-top:0.5rem">
+              Código: <strong class="mono" id="edit-lic-code">—</strong>
+              · El código <em>no cambia</em>; solo se actualiza el plan y la vigencia.
+            </p>
+            <form id="form-edit-license" style="padding:1rem 1.5rem 1.5rem">
+              <input type="hidden" id="edit-lic-id" />
+              <div class="grid-2">
+                <div class="field">
+                  <label for="edit-template">Aplicar plantilla (opcional)</label>
+                  <select id="edit-template">
+                    <option value="">— no cambiar por plantilla —</option>
+                    <option value="trial">Trial (7 días)</option>
+                    <option value="standard">Standard / mensual (30 días)</option>
+                    <option value="pro">Pro / anual (365 días)</option>
+                    <option value="enterprise">Enterprise (365 días)</option>
+                  </select>
+                  <div class="hint">Al elegir plantilla se cargan cupos y duración típicos. Puedes ajustar abajo.</div>
+                </div>
+                <div class="field">
+                  <label for="edit-type">Tipo</label>
+                  <input id="edit-type" placeholder="standard / pro / …" />
+                </div>
+                <div class="field">
+                  <label for="edit-label">Etiqueta</label>
+                  <input id="edit-label" />
+                </div>
+                <div class="field">
+                  <label for="edit-company">Empresa</label>
+                  <input id="edit-company" />
+                </div>
+                <div class="field">
+                  <label for="edit-limit">Límite global (0 = ∞)</label>
+                  <input id="edit-limit" type="number" min="0" />
+                </div>
+                <div class="field">
+                  <label for="edit-daily">Límite diario (0 = ∞)</label>
+                  <input id="edit-daily" type="number" min="0" />
+                </div>
+                <div class="field">
+                  <label for="edit-devices">Máx. equipos</label>
+                  <input id="edit-devices" type="number" min="1" />
+                </div>
+                <div class="field">
+                  <label for="edit-expiry-policy">Política de vigencia</label>
+                  <select id="edit-expiry-policy">
+                    <option value="extend">Extender desde vencimiento actual (o hoy)</option>
+                    <option value="replace_from_today">Nuevo ciclo desde hoy</option>
+                    <option value="set_absolute">Fecha fija</option>
+                    <option value="keep">No cambiar fecha</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="edit-duration">Días (duration / extend)</label>
+                  <input id="edit-duration" type="number" min="1" placeholder="30, 365…" />
+                  <div class="hint">Mensual→anual: plantilla Pro o 365 + “Nuevo ciclo desde hoy”.</div>
+                </div>
+                <div class="field">
+                  <label for="edit-expiry">Fecha de vencimiento (si “Fecha fija”)</label>
+                  <input id="edit-expiry" type="date" />
+                </div>
+              </div>
+              <div class="field">
+                <label><input id="edit-count-global" type="checkbox" style="width:auto;margin-right:0.4rem" /> Contar en cupo global</label>
+              </div>
+              <div class="field">
+                <label><input id="edit-enforce-daily" type="checkbox" style="width:auto;margin-right:0.4rem" /> Aplicar límite diario</label>
+              </div>
+              <div class="field">
+                <label><input id="edit-active" type="checkbox" style="width:auto;margin-right:0.4rem" /> Licencia activa</label>
+              </div>
+              <div class="field">
+                <label><input id="edit-reset-uses" type="checkbox" style="width:auto;margin-right:0.4rem" /> Resetear contador de usos a 0</label>
+              </div>
+              <div class="field">
+                <label for="edit-note">Nota del cambio (historial)</label>
+                <input id="edit-note" placeholder="Ej. Upgrade mensual → anual pagado 2026-07-21" />
+              </div>
+              <div class="row-actions" style="gap:0.5rem;flex-wrap:wrap;margin-top:0.75rem">
+                <button type="button" class="btn btn-ghost btn-sm" data-action="quick-extend" data-days="30">+30 días</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-action="quick-extend" data-days="365">+365 días</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-action="quick-annual">Upgrade anual (Pro)</button>
+                <span style="flex:1"></span>
+                <button type="button" class="btn btn-ghost" data-action="close-lic-edit">Cancelar</button>
+                <button type="submit" class="btn btn-primary">Guardar cambio de plan</button>
+              </div>
+            </form>
+          </div>
+        </div>
 
         <section data-panel="users" class="card hidden">
           <h2>Usuarios</h2>

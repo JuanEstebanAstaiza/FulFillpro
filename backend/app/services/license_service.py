@@ -213,7 +213,111 @@ def create_license(db: Session, data: dict) -> License:
     return lic
 
 
+def _snapshot_license(lic: License) -> dict[str, Any]:
+    return {
+        "type": lic.type,
+        "label": lic.label,
+        "limit_uses": lic.limit_uses,
+        "daily_limit": lic.daily_limit,
+        "max_devices": lic.max_devices,
+        "expiry": lic.expiry.isoformat() if lic.expiry else None,
+        "uses": lic.uses,
+        "active": lic.active,
+        "count_toward_global": lic.count_toward_global,
+        "enforce_daily_limit": lic.enforce_daily_limit,
+    }
+
+
+def _apply_expiry_policy(
+    lic: License,
+    *,
+    expiry_policy: str = "keep",
+    duration_days: Optional[int] = None,
+    extend_days: Optional[int] = None,
+    expiry: Optional[date] = None,
+) -> None:
+    """
+    Políticas de vigencia al editar una licencia activa:
+      - keep: no toca expiry
+      - set_absolute: usa `expiry` tal cual
+      - replace_from_today: expiry = hoy + duration_days
+      - extend: suma días desde max(hoy, expiry actual)
+        (usa extend_days o duration_days)
+    """
+    policy = (expiry_policy or "keep").strip().lower()
+    if policy in {"", "keep", "none"}:
+        if extend_days is not None and int(extend_days) != 0:
+            policy = "extend"
+        elif expiry is not None:
+            policy = "set_absolute"
+        elif duration_days is not None:
+            policy = "replace_from_today"
+        else:
+            return
+
+    today = date.today()
+    if policy == "set_absolute":
+        if expiry is None:
+            raise HTTPException(400, "expiry_policy=set_absolute requiere fecha expiry.")
+        lic.expiry = expiry
+        return
+
+    if policy == "replace_from_today":
+        days = int(duration_days if duration_days is not None else extend_days or 0)
+        if days <= 0:
+            raise HTTPException(400, "duration_days debe ser > 0 para replace_from_today.")
+        lic.expiry = today + timedelta(days=days)
+        return
+
+    if policy == "extend":
+        days = int(extend_days if extend_days is not None else duration_days or 0)
+        if days <= 0:
+            raise HTTPException(400, "extend_days/duration_days debe ser > 0 para extend.")
+        base = lic.expiry if lic.expiry and lic.expiry > today else today
+        lic.expiry = base + timedelta(days=days)
+        return
+
+    raise HTTPException(
+        400,
+        f"expiry_policy no válida: {expiry_policy}. "
+        "Usa keep | extend | replace_from_today | set_absolute.",
+    )
+
+
+def _append_plan_history(lic: License, entry: dict[str, Any]) -> None:
+    feats = dict(lic.features or {})
+    history = list(feats.get("plan_changes") or [])
+    history.append(entry)
+    # conservar últimas 50 entradas
+    feats["plan_changes"] = history[-50:]
+    lic.features = feats
+
+
 def update_license(db: Session, lic: License, data: dict) -> License:
+    """
+    Actualiza una licencia activa sin recrearla.
+    Conserva código, historial de usos (salvo reset_uses) y owner salvo que se envíe.
+    """
+    payload = dict(data)
+    before = _snapshot_license(lic)
+
+    apply_template = payload.pop("apply_template", None) or payload.pop("template", None)
+    if apply_template and apply_template in TEMPLATES:
+        base = TEMPLATES[apply_template].copy()
+        tpl_duration = base.pop("duration_days", None)
+        # No pisar campos ya enviados explícitamente
+        for k, v in base.items():
+            payload.setdefault(k, v)
+        if payload.get("duration_days") is None and tpl_duration is not None:
+            payload.setdefault("duration_days", tpl_duration)
+        payload.setdefault("type", apply_template if apply_template != "custom" else lic.type)
+
+    extend_days = payload.pop("extend_days", None)
+    duration_days = payload.pop("duration_days", None)
+    expiry_policy = payload.pop("expiry_policy", None)
+    reset_uses = bool(payload.pop("reset_uses", False))
+    append_note = payload.pop("append_note", None)
+
     for field in (
         "label",
         "type",
@@ -221,24 +325,123 @@ def update_license(db: Session, lic: License, data: dict) -> License:
         "max_devices",
         "limit_uses",
         "daily_limit",
-        "expiry",
         "active",
         "count_toward_global",
         "enforce_daily_limit",
         "features",
         "notes",
+        "analytics_enabled",
+        "analytics_weeks_retention",
+        "analytics_max_events_per_week",
+        "analytics_storage_mb",
     ):
-        if field in data and data[field] is not None:
-            setattr(lic, field, data[field])
+        if field in payload and payload[field] is not None:
+            setattr(lic, field, payload[field])
 
-    if "owner_user_id" in data:
-        lic.owner_user_id = data["owner_user_id"]
-        if data["owner_user_id"]:
+    if "owner_user_id" in payload:
+        lic.owner_user_id = payload["owner_user_id"]
+        if payload["owner_user_id"]:
             lic.assigned_at = datetime.utcnow()
+
+    # expiry: policy tiene prioridad; si solo mandan expiry, set_absolute
+    exp_value = payload.get("expiry", None) if "expiry" in payload else None
+    if expiry_policy or extend_days is not None or duration_days is not None or (
+        "expiry" in payload and payload.get("expiry") is not None
+    ):
+        _apply_expiry_policy(
+            lic,
+            expiry_policy=expiry_policy
+            or ("set_absolute" if exp_value is not None else "keep"),
+            duration_days=int(duration_days) if duration_days is not None else None,
+            extend_days=int(extend_days) if extend_days is not None else None,
+            expiry=exp_value,
+        )
+
+    if reset_uses:
+        lic.uses = 0
+
+    if append_note and str(append_note).strip():
+        stamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+        line = f"[{stamp}] {str(append_note).strip()}"
+        lic.notes = (f"{lic.notes}\n{line}" if lic.notes else line).strip()
+
+    after = _snapshot_license(lic)
+    if before != after:
+        _append_plan_history(
+            lic,
+            {
+                "at": datetime.utcnow().isoformat() + "Z",
+                "action": "update",
+                "before": before,
+                "after": after,
+                "template": apply_template,
+            },
+        )
+
+    # Reactivar si venía vencida/inactiva y el cambio de plan lo pide
+    if payload.get("active") is True:
+        lic.active = True
 
     db.commit()
     db.refresh(lic)
     cache_delete(f"license:{lic.code}")
+    return lic
+
+
+def change_plan(db: Session, lic: License, data: dict) -> License:
+    """
+    Atajo semántico para upgrade/cambio de plan en caliente.
+    Misma licencia y código; la empresa no cambia de credenciales.
+    """
+    payload = dict(data)
+    template = payload.pop("template", None)
+    apply_quotas = payload.pop("apply_template_quotas", True)
+    if template and apply_quotas:
+        payload["apply_template"] = template
+    elif template and not apply_quotas:
+        # solo marca el type del template si no hay type explícito
+        payload.setdefault("type", template)
+
+    # Defaults de política de tiempo al cambiar de plan
+    if payload.get("expiry_policy") is None:
+        if payload.get("extend_days") is not None:
+            payload["expiry_policy"] = "extend"
+        elif payload.get("duration_days") is not None:
+            # Upgrade típico mensual→anual: nuevo ciclo desde hoy
+            payload["expiry_policy"] = "replace_from_today"
+        elif payload.get("expiry") is not None:
+            payload["expiry_policy"] = "set_absolute"
+        else:
+            # Si hay template con duración implícita vía apply_template
+            if template and template in TEMPLATES and apply_quotas:
+                payload.setdefault("duration_days", TEMPLATES[template].get("duration_days"))
+                payload["expiry_policy"] = "replace_from_today"
+            else:
+                payload["expiry_policy"] = "keep"
+
+    if payload.get("active") is None:
+        payload["active"] = True
+
+    reason = payload.get("append_note") or ""
+    if template and not reason:
+        payload["append_note"] = f"Cambio de plan → plantilla '{template}'"
+    elif not reason and (payload.get("duration_days") or payload.get("extend_days")):
+        payload["append_note"] = "Ajuste de vigencia / plan sin recrear licencia"
+
+    before_type = lic.type
+    lic = update_license(db, lic, payload)
+    # Marcar última acción como change_plan en history
+    feats = dict(lic.features or {})
+    hist = list(feats.get("plan_changes") or [])
+    if hist:
+        hist[-1]["action"] = "change_plan"
+        hist[-1]["from_type"] = before_type
+        hist[-1]["to_type"] = lic.type
+        feats["plan_changes"] = hist
+        lic.features = feats
+        db.commit()
+        db.refresh(lic)
+        cache_delete(f"license:{lic.code}")
     return lic
 
 

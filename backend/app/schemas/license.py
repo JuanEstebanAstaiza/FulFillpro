@@ -35,11 +35,50 @@ class LicenseUpdate(BaseModel):
     limit_uses: Optional[int] = None
     daily_limit: Optional[int] = None
     expiry: Optional[date] = None
+    # Extiende vigencia sin recrear licencia (días desde max(hoy, expiry actual))
+    extend_days: Optional[int] = None
+    # Si se envía, calcula expiry según expiry_policy
+    duration_days: Optional[int] = None
+    # replace_from_today | extend | set_absolute | keep
+    expiry_policy: Optional[str] = None
     active: Optional[bool] = None
     count_toward_global: Optional[bool] = None
     enforce_daily_limit: Optional[bool] = None
     features: Optional[dict[str, Any]] = None
     notes: Optional[str] = None
+    append_note: Optional[str] = None
+    reset_uses: Optional[bool] = None
+    # Aplica cupos/tipo/analytics de plantilla (no cambia código ni dueño)
+    apply_template: Optional[str] = None
+
+
+class LicenseChangePlan(BaseModel):
+    """
+    Cambio de plan en caliente (misma licencia / mismo código).
+    Ej.: mensual (30d) → anual (365d) sin desactivar ni crear otra.
+    """
+
+    template: Optional[str] = None  # trial | standard | pro | enterprise
+    type: Optional[str] = None
+    label: Optional[str] = None
+    company_name: Optional[str] = None
+    max_devices: Optional[int] = None
+    limit_uses: Optional[int] = None
+    daily_limit: Optional[int] = None
+    # Tiempo de vigencia
+    duration_days: Optional[int] = None
+    extend_days: Optional[int] = None
+    expiry: Optional[date] = None
+    # replace_from_today (default si duration_days) | extend | set_absolute | keep
+    expiry_policy: str = "extend"
+    count_toward_global: Optional[bool] = None
+    enforce_daily_limit: Optional[bool] = None
+    active: Optional[bool] = True
+    notes: Optional[str] = None
+    append_note: Optional[str] = None
+    reset_uses: bool = False
+    # Si true y hay template, sobrescribe límites del template (salvo overrides explícitos)
+    apply_template_quotas: bool = True
 
 
 class DeviceOut(BaseModel):

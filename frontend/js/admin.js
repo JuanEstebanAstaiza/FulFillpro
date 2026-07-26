@@ -2,6 +2,7 @@ const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 
 let me = null;
+let licensesCache = [];
 
 async function init() {
   me = await loadSession();
@@ -31,7 +32,9 @@ async function init() {
   );
 
   $("#form-license").addEventListener("submit", createLicense);
+  $("#form-edit-license")?.addEventListener("submit", saveLicenseEdit);
   $("#template").addEventListener("change", applyTemplateHints);
+  $("#edit-template")?.addEventListener("change", onEditTemplateChange);
   applyTemplateHints();
 
   $("#btn-backup-refresh")?.addEventListener("click", () => loadBackupInfo());
@@ -287,6 +290,7 @@ async function loadCompanyUsage() {
 
 async function loadLicenses() {
   const list = await API.request("/api/admin/licenses");
+  licensesCache = list || [];
   $("#licenses-body").innerHTML = list
     .map((l) => {
       const limit = l.limit_uses > 0 ? l.limit_uses : "∞";
@@ -299,6 +303,7 @@ async function loadLicenses() {
         <td>${l.expiry || "—"} (${l.days_left == null ? "∞" : l.days_left + "d"})</td>
         <td><span class="badge ${l.active ? "badge-ok" : "badge-err"}">${l.active ? "activa" : "off"}</span></td>
         <td class="row-actions">
+          <button class="btn btn-sm btn-primary" type="button" data-action="edit-lic" data-id="${escape(l.id)}">Editar plan</button>
           <button class="btn btn-sm btn-ghost" type="button" data-action="toggle-lic" data-id="${escape(l.id)}">Toggle</button>
           <button class="btn btn-sm btn-ghost" type="button" data-action="reset-uses" data-id="${escape(l.id)}">Reset usos</button>
           <button class="btn btn-sm btn-ghost" type="button" data-action="renew-lic" data-id="${escape(l.id)}">+30d</button>
@@ -306,6 +311,128 @@ async function loadLicenses() {
       </tr>`;
     })
     .join("");
+}
+
+function openLicenseEdit(id) {
+  const lic = licensesCache.find((x) => String(x.id) === String(id));
+  if (!lic) {
+    showAdminAlert("No se encontró la licencia en caché. Recarga la lista.");
+    return;
+  }
+  $("#edit-lic-id").value = lic.id;
+  $("#edit-lic-code").textContent = lic.code;
+  $("#edit-template").value = "";
+  $("#edit-type").value = lic.type || "";
+  $("#edit-label").value = lic.label || "";
+  $("#edit-company").value = lic.company_name || "";
+  $("#edit-limit").value = lic.limit_uses ?? 0;
+  $("#edit-daily").value = lic.daily_limit ?? 0;
+  $("#edit-devices").value = lic.max_devices ?? 5;
+  $("#edit-expiry-policy").value = "extend";
+  $("#edit-duration").value = "";
+  $("#edit-expiry").value = lic.expiry || "";
+  $("#edit-count-global").checked = !!lic.count_toward_global;
+  $("#edit-enforce-daily").checked = !!lic.enforce_daily_limit;
+  $("#edit-active").checked = !!lic.active;
+  $("#edit-reset-uses").checked = false;
+  $("#edit-note").value = "";
+  const ov = $("#lic-edit-overlay");
+  ov.classList.remove("hidden");
+  ov.setAttribute("aria-hidden", "false");
+}
+
+function closeLicenseEdit() {
+  const ov = $("#lic-edit-overlay");
+  if (!ov) return;
+  ov.classList.add("hidden");
+  ov.setAttribute("aria-hidden", "true");
+}
+
+function onEditTemplateChange() {
+  const t = $("#edit-template").value;
+  const presets = {
+    trial: { type: "trial", limit: 50, daily: 3, devices: 3, days: 7, policy: "replace_from_today" },
+    standard: { type: "standard", limit: 500, daily: 50, devices: 5, days: 30, policy: "replace_from_today" },
+    pro: { type: "pro", limit: 0, daily: 200, devices: 15, days: 365, policy: "replace_from_today" },
+    enterprise: { type: "enterprise", limit: 0, daily: 0, devices: 999, days: 365, policy: "replace_from_today" },
+  };
+  const p = presets[t];
+  if (!p) return;
+  $("#edit-type").value = p.type;
+  $("#edit-limit").value = p.limit;
+  $("#edit-daily").value = p.daily;
+  $("#edit-devices").value = p.devices;
+  $("#edit-duration").value = p.days;
+  $("#edit-expiry-policy").value = p.policy;
+  if (!$("#edit-label").value || /plan|trial|standard|pro|enterprise/i.test($("#edit-label").value)) {
+    $("#edit-label").value =
+      t === "pro"
+        ? "Plan Pro (anual)"
+        : t === "standard"
+        ? "Plan Standard (mensual)"
+        : t === "enterprise"
+        ? "Plan Enterprise"
+        : "Prueba gratuita";
+  }
+}
+
+async function saveLicenseEdit(e) {
+  e.preventDefault();
+  const id = $("#edit-lic-id").value;
+  if (!id) return;
+  const body = {
+    type: $("#edit-type").value.trim() || undefined,
+    label: $("#edit-label").value.trim() || undefined,
+    company_name: $("#edit-company").value.trim() || undefined,
+    max_devices: numOrNull($("#edit-devices").value),
+    limit_uses: numOrNull($("#edit-limit").value),
+    daily_limit: numOrNull($("#edit-daily").value),
+    expiry_policy: $("#edit-expiry-policy").value || "keep",
+    count_toward_global: $("#edit-count-global").checked,
+    enforce_daily_limit: $("#edit-enforce-daily").checked,
+    active: $("#edit-active").checked,
+    reset_uses: $("#edit-reset-uses").checked,
+    append_note: $("#edit-note").value.trim() || undefined,
+    apply_template_quotas: true,
+  };
+  const tpl = $("#edit-template").value;
+  if (tpl) body.template = tpl;
+  const days = numOrNull($("#edit-duration").value);
+  const policy = body.expiry_policy;
+  if (policy === "extend" && days) body.extend_days = days;
+  if (policy === "replace_from_today" && days) body.duration_days = days;
+  if (policy === "set_absolute") {
+    const exp = $("#edit-expiry").value;
+    if (!exp) {
+      showAdminAlert("Indica la fecha de vencimiento para política “Fecha fija”.");
+      return;
+    }
+    body.expiry = exp;
+  }
+  if (policy === "keep") {
+    delete body.extend_days;
+    delete body.duration_days;
+  }
+  // Si hay plantilla y no hay días, el backend usa la duración de plantilla
+  Object.keys(body).forEach((k) => {
+    if (body[k] === undefined || body[k] === null || body[k] === "") delete body[k];
+  });
+
+  try {
+    const res = await API.request(`/api/admin/licenses/${id}/change-plan`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    closeLicenseEdit();
+    await loadLicenses();
+    await loadOverview();
+    const msg =
+      (res.change && res.change.message) ||
+      `Licencia ${res.code} actualizada. Vence: ${res.expiry || "sin fecha"}.`;
+    showAdminAlert(msg, "ok");
+  } catch (err) {
+    showAdminAlert(err.message);
+  }
 }
 
 async function loadUsers() {
@@ -398,9 +525,9 @@ async function createLicense(e) {
     $("#lic-enforce-daily").checked = true;
     await loadLicenses();
     await loadOverview();
-    showAlert($("#admin-alert"), "Licencia creada.", "ok");
+    showAdminAlert("Licencia creada.", "ok");
   } catch (err) {
-    showAlert($("#admin-alert"), err.message);
+    showAdminAlert(err.message);
   }
 }
 
@@ -418,9 +545,10 @@ async function resetUses(id) {
   await API.request(`/api/admin/licenses/${id}/reset-uses`, { method: "POST" });
   await loadLicenses();
 }
-async function renewLic(id) {
-  await API.request(`/api/admin/licenses/${id}/renew?days=30`, { method: "POST" });
+async function renewLic(id, days = 30) {
+  await API.request(`/api/admin/licenses/${id}/renew?days=${days}`, { method: "POST" });
   await loadLicenses();
+  showAdminAlert(`Vigencia extendida +${days} días.`, "ok");
 }
 async function toggleUser(id) {
   await API.request(`/api/admin/users/${id}/toggle`, { method: "POST" });
@@ -455,7 +583,26 @@ document.addEventListener("click", (e) => {
     resetUses(id);
   } else if (action === "renew-lic") {
     e.preventDefault();
-    renewLic(id);
+    renewLic(id, 30);
+  } else if (action === "edit-lic") {
+    e.preventDefault();
+    openLicenseEdit(id);
+  } else if (action === "close-lic-edit") {
+    e.preventDefault();
+    closeLicenseEdit();
+  } else if (action === "quick-extend") {
+    e.preventDefault();
+    const days = parseInt(btn.dataset.days || "30", 10);
+    $("#edit-expiry-policy").value = "extend";
+    $("#edit-duration").value = days;
+    $("#edit-note").value = $("#edit-note").value || `Extensión rápida +${days}d`;
+  } else if (action === "quick-annual") {
+    e.preventDefault();
+    $("#edit-template").value = "pro";
+    onEditTemplateChange();
+    $("#edit-expiry-policy").value = "replace_from_today";
+    $("#edit-duration").value = "365";
+    $("#edit-note").value = $("#edit-note").value || "Upgrade a plan anual (Pro)";
   } else if (action === "toggle-user") {
     e.preventDefault();
     toggleUser(id);

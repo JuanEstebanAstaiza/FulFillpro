@@ -20,7 +20,7 @@ from backend.app.models.license import License
 from backend.app.models.order import Order
 from backend.app.models.user import User
 from backend.app.schemas.auth import UserOut
-from backend.app.schemas.license import LicenseCreate, LicenseOut, LicenseUpdate
+from backend.app.schemas.license import LicenseChangePlan, LicenseCreate, LicenseOut, LicenseUpdate
 from backend.app.services import backup_service, license_service
 from backend.app.services.audit_service import log_access, log_security
 
@@ -69,18 +69,81 @@ def update_license(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
+    """Edita una licencia activa (cupos, vigencia, tipo) sin recrearla."""
     lic = db.query(License).options(joinedload(License.devices)).filter(License.id == license_id).first()
     if not lic:
         raise HTTPException(404, "Licencia no encontrada.")
+    before = f"{lic.type}|{lic.expiry}|{lic.limit_uses}|{lic.daily_limit}"
     lic = license_service.update_license(db, lic, body.model_dump(exclude_unset=True))
     log_access(
         db,
         event_type="admin",
-        detail=f"Licencia actualizada {lic.code}",
+        detail=(
+            f"Licencia actualizada {lic.code} · "
+            f"{before} → {lic.type}|{lic.expiry}|{lic.limit_uses}|{lic.daily_limit}"
+        ),
         user_id=admin.id,
         license_code=lic.code,
+        label=lic.label,
     )
     return license_service.license_to_dict(db, lic)
+
+
+@router.post("/licenses/{license_id}/change-plan")
+def change_plan(
+    license_id: UUID,
+    body: LicenseChangePlan,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """
+    Cambia el plan de una licencia en caliente (mismo código y empresa).
+
+    Casos típicos:
+    - Mensual → anual: template=pro o duration_days=365, expiry_policy=replace_from_today
+    - Ampliar cupo sin tocar fechas: limit_uses / daily_limit, expiry_policy=keep
+    - Extender 30 días: extend_days=30, expiry_policy=extend
+    """
+    lic = db.query(License).options(joinedload(License.devices)).filter(License.id == license_id).first()
+    if not lic:
+        raise HTTPException(404, "Licencia no encontrada.")
+    old = {
+        "type": lic.type,
+        "expiry": str(lic.expiry) if lic.expiry else None,
+        "limit_uses": lic.limit_uses,
+        "daily_limit": lic.daily_limit,
+        "uses": lic.uses,
+    }
+    lic = license_service.change_plan(db, lic, body.model_dump(exclude_unset=True))
+    log_access(
+        db,
+        event_type="admin",
+        detail=(
+            f"Cambio de plan {lic.code}: "
+            f"{old['type']}/{old['expiry']}/{old['limit_uses']} → "
+            f"{lic.type}/{lic.expiry}/{lic.limit_uses}"
+        ),
+        user_id=admin.id,
+        license_code=lic.code,
+        label=lic.label,
+    )
+    return {
+        **license_service.license_to_dict(db, lic),
+        "change": {
+            "before": old,
+            "after": {
+                "type": lic.type,
+                "expiry": str(lic.expiry) if lic.expiry else None,
+                "limit_uses": lic.limit_uses,
+                "daily_limit": lic.daily_limit,
+                "uses": lic.uses,
+            },
+            "message": (
+                f"Plan actualizado. El código {lic.code} se mantiene: "
+                "la empresa no necesita licencia nueva."
+            ),
+        },
+    }
 
 
 @router.post("/licenses/{license_id}/assign/{user_id}")
@@ -136,18 +199,31 @@ def reset_uses(
 @router.post("/licenses/{license_id}/renew")
 def renew(
     license_id: UUID,
-    days: int = 30,
+    days: int = Query(30, ge=1, le=3660),
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    from datetime import date
-
+    """Extiende vigencia (por defecto +30 días) sin cambiar plan ni código."""
     lic = db.query(License).options(joinedload(License.devices)).filter(License.id == license_id).first()
     if not lic:
         raise HTTPException(404, "Licencia no encontrada.")
-    base = lic.expiry if lic.expiry and lic.expiry > date.today() else date.today()
-    lic.expiry = base + timedelta(days=days)
-    db.commit()
+    lic = license_service.update_license(
+        db,
+        lic,
+        {
+            "extend_days": days,
+            "expiry_policy": "extend",
+            "active": True,
+            "append_note": f"Renovación rápida +{days}d",
+        },
+    )
+    log_access(
+        db,
+        event_type="admin",
+        detail=f"Licencia {lic.code} renovada +{days}d → vence {lic.expiry}",
+        user_id=admin.id,
+        license_code=lic.code,
+    )
     return license_service.license_to_dict(db, lic)
 
 
