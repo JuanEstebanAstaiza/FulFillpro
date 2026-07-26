@@ -134,3 +134,45 @@ class ValidateDeviceRequest(BaseModel):
     device_id: str
     device_fingerprint: str = ""
     device_soft: str = ""
+
+
+class LicenseTemplateCreate(BaseModel):
+    slug: Optional[str] = None
+    name: str
+    description: str = ""
+    license_type: str = "standard"
+    label_default: str = ""
+    max_devices: int = 5
+    limit_uses: int = 0
+    daily_limit: int = 0
+    duration_days: int = 30
+    count_toward_global: bool = True
+    enforce_daily_limit: bool = True
+    analytics_enabled: bool = True
+    analytics_weeks_retention: int = 12
+    analytics_max_events_per_week: int = 50000
+    analytics_storage_mb: int = 200
+    features: dict[str, Any] = Field(default_factory=dict)
+    is_active: bool = True
+    sort_order: int = 100
+
+
+class LicenseTemplateUpdate(BaseModel):
+    slug: Optional[str] = None
+    name: Optional[str] = None
+    description: Optional[str] = None
+    license_type: Optional[str] = None
+    label_default: Optional[str] = None
+    max_devices: Optional[int] = None
+    limit_uses: Optional[int] = None
+    daily_limit: Optional[int] = None
+    duration_days: Optional[int] = None
+    count_toward_global: Optional[bool] = None
+    enforce_daily_limit: Optional[bool] = None
+    analytics_enabled: Optional[bool] = None
+    analytics_weeks_retention: Optional[int] = None
+    analytics_max_events_per_week: Optional[int] = None
+    analytics_storage_mb: Optional[int] = None
+    features: Optional[dict[str, Any]] = None
+    is_active: Optional[bool] = None
+    sort_order: Optional[int] = None

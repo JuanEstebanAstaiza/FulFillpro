@@ -20,7 +20,15 @@ from backend.app.models.license import License
 from backend.app.models.order import Order
 from backend.app.models.user import User
 from backend.app.schemas.auth import UserOut
-from backend.app.schemas.license import LicenseChangePlan, LicenseCreate, LicenseOut, LicenseUpdate
+from backend.app.models.license import LicenseTemplate
+from backend.app.schemas.license import (
+    LicenseChangePlan,
+    LicenseCreate,
+    LicenseOut,
+    LicenseTemplateCreate,
+    LicenseTemplateUpdate,
+    LicenseUpdate,
+)
 from backend.app.services import backup_service, license_service
 from backend.app.services.audit_service import log_access, log_security
 
@@ -258,9 +266,90 @@ def delete_license(
     return {"ok": True}
 
 
+# ── Plantillas de plan (editables en Ops) ───────────────────
+
+
 @router.get("/license-templates")
-def templates(_: User = Depends(require_admin)):
-    return license_service.TEMPLATES
+def list_license_templates(
+    active_only: bool = Query(False),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    """Lista plantillas (trial/standard/pro… y las que crees tú)."""
+    license_service.seed_license_templates(db)
+    rows = license_service.list_templates(db, active_only=active_only)
+    return [license_service.template_to_dict(t) for t in rows]
+
+
+@router.post("/license-templates")
+def create_license_template(
+    body: LicenseTemplateCreate,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Crea una plantilla nueva (p. ej. 'mensual-plus', 'anual-premium')."""
+    tpl = license_service.create_template(db, body.model_dump(exclude_none=True))
+    log_access(
+        db,
+        event_type="admin",
+        detail=f"Plantilla creada {tpl.slug}",
+        user_id=admin.id,
+        label=tpl.name,
+    )
+    return license_service.template_to_dict(tpl)
+
+
+@router.patch("/license-templates/{template_id}")
+def update_license_template(
+    template_id: UUID,
+    body: LicenseTemplateUpdate,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Modifica cupos/duración de una plantilla predeterminada o custom."""
+    tpl = db.query(LicenseTemplate).filter(LicenseTemplate.id == template_id).first()
+    if not tpl:
+        raise HTTPException(404, "Plantilla no encontrada.")
+    before = f"{tpl.slug}|{tpl.duration_days}|{tpl.limit_uses}|{tpl.daily_limit}"
+    tpl = license_service.update_template(db, tpl, body.model_dump(exclude_unset=True))
+    log_access(
+        db,
+        event_type="admin",
+        detail=(
+            f"Plantilla actualizada {tpl.slug}: {before} → "
+            f"{tpl.slug}|{tpl.duration_days}|{tpl.limit_uses}|{tpl.daily_limit}"
+        ),
+        user_id=admin.id,
+        label=tpl.name,
+    )
+    return license_service.template_to_dict(tpl)
+
+
+@router.delete("/license-templates/{template_id}")
+def delete_license_template(
+    template_id: UUID,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """
+    Borra plantilla custom.
+    Las de sistema (trial/standard/pro/enterprise) solo se desactivan.
+    """
+    tpl = db.query(LicenseTemplate).filter(LicenseTemplate.id == template_id).first()
+    if not tpl:
+        raise HTTPException(404, "Plantilla no encontrada.")
+    slug = tpl.slug
+    was_system = tpl.is_system
+    license_service.delete_template(db, tpl)
+    log_access(
+        db,
+        event_type="admin",
+        detail=(
+            f"Plantilla {'desactivada' if was_system else 'eliminada'} {slug}"
+        ),
+        user_id=admin.id,
+    )
+    return {"ok": True, "slug": slug, "deactivated_only": was_system}
 
 
 # ── Usuarios ───────────────────────────────────────────────

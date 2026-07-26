@@ -3,6 +3,7 @@ const $$ = (s) => [...document.querySelectorAll(s)];
 
 let me = null;
 let licensesCache = [];
+let templatesCache = [];
 
 async function init() {
   me = await loadSession();
@@ -28,14 +29,17 @@ async function init() {
       $$("[data-panel]").forEach((p) => p.classList.add("hidden"));
       const panel = $(`[data-panel="${t.dataset.tab}"]`);
       if (panel) panel.classList.remove("hidden");
+      if (t.dataset.tab === "backup") loadBackupInfo();
+      if (t.dataset.tab === "templates") loadTemplates();
     })
   );
 
   $("#form-license").addEventListener("submit", createLicense);
   $("#form-edit-license")?.addEventListener("submit", saveLicenseEdit);
+  $("#form-template")?.addEventListener("submit", saveTemplateForm);
   $("#template").addEventListener("change", applyTemplateHints);
   $("#edit-template")?.addEventListener("change", onEditTemplateChange);
-  applyTemplateHints();
+  $("#tpl-reset-btn")?.addEventListener("click", resetTemplateForm);
 
   $("#btn-backup-refresh")?.addEventListener("click", () => loadBackupInfo());
   $("#btn-backup-download")?.addEventListener("click", downloadBackup);
@@ -43,16 +47,10 @@ async function init() {
   $("#btn-backup-restore")?.addEventListener("click", restoreBackup);
   $("#backup-include-storage")?.addEventListener("change", () => loadBackupInfo());
 
-  // Cargar estimación al abrir pestaña backup
-  $$(".tab[data-tab]").forEach((t) =>
-    t.addEventListener("click", () => {
-      if (t.dataset.tab === "backup") loadBackupInfo();
-    })
-  );
-
   await Promise.all([
     loadOverview(),
     loadCompanyUsage(),
+    loadTemplates(),
     loadLicenses(),
     loadUsers(),
     loadLogs(),
@@ -349,31 +347,19 @@ function closeLicenseEdit() {
 }
 
 function onEditTemplateChange() {
-  const t = $("#edit-template").value;
-  const presets = {
-    trial: { type: "trial", limit: 50, daily: 3, devices: 3, days: 7, policy: "replace_from_today" },
-    standard: { type: "standard", limit: 500, daily: 50, devices: 5, days: 30, policy: "replace_from_today" },
-    pro: { type: "pro", limit: 0, daily: 200, devices: 15, days: 365, policy: "replace_from_today" },
-    enterprise: { type: "enterprise", limit: 0, daily: 0, devices: 999, days: 365, policy: "replace_from_today" },
-  };
-  const p = presets[t];
+  const slug = $("#edit-template").value;
+  if (!slug) return;
+  const p = templatesCache.find((x) => x.slug === slug);
   if (!p) return;
-  $("#edit-type").value = p.type;
-  $("#edit-limit").value = p.limit;
-  $("#edit-daily").value = p.daily;
-  $("#edit-devices").value = p.devices;
-  $("#edit-duration").value = p.days;
-  $("#edit-expiry-policy").value = p.policy;
-  if (!$("#edit-label").value || /plan|trial|standard|pro|enterprise/i.test($("#edit-label").value)) {
-    $("#edit-label").value =
-      t === "pro"
-        ? "Plan Pro (anual)"
-        : t === "standard"
-        ? "Plan Standard (mensual)"
-        : t === "enterprise"
-        ? "Plan Enterprise"
-        : "Prueba gratuita";
-  }
+  $("#edit-type").value = p.license_type || slug;
+  $("#edit-limit").value = p.limit_uses ?? 0;
+  $("#edit-daily").value = p.daily_limit ?? 0;
+  $("#edit-devices").value = p.max_devices ?? 5;
+  $("#edit-duration").value = p.duration_days ?? 30;
+  $("#edit-expiry-policy").value = "replace_from_today";
+  $("#edit-label").value = p.label_default || p.name || "";
+  $("#edit-count-global").checked = !!p.count_toward_global;
+  $("#edit-enforce-daily").checked = !!p.enforce_daily_limit;
 }
 
 async function saveLicenseEdit(e) {
@@ -488,15 +474,210 @@ async function loadIncidents() {
 }
 
 function applyTemplateHints() {
-  const t = $("#template").value;
-  const hints = {
-    trial: "50 órdenes globales · 3/día · 7 días",
-    standard: "500 órdenes · 50/día · 30 días",
-    pro: "Ilimitado global · 200/día · 365 días",
-    enterprise: "Ilimitado · sin tope diario · 365 días",
-    custom: "Configura los campos manualmente",
+  const t = $("#template")?.value || "custom";
+  if (t === "custom" || !t) {
+    $("#template-hint").textContent = "Configura los campos manualmente (sin plantilla).";
+    return;
+  }
+  const tpl = templatesCache.find((x) => x.slug === t);
+  if (!tpl) {
+    $("#template-hint").textContent = "";
+    return;
+  }
+  $("#template-hint").textContent = tpl.hint || tpl.description || "";
+  // Prefill cupos de la plantilla (el admin puede sobrescribir)
+  if ($("#lic-limit") && $("#lic-limit").value === "") $("#lic-limit").value = tpl.limit_uses ?? "";
+  if ($("#lic-daily") && $("#lic-daily").value === "") $("#lic-daily").value = tpl.daily_limit ?? "";
+  if ($("#lic-days") && $("#lic-days").value === "") $("#lic-days").value = tpl.duration_days ?? "";
+  if ($("#lic-devices")) $("#lic-devices").value = tpl.max_devices ?? 5;
+  if ($("#lic-label") && !$("#lic-label").value) $("#lic-label").value = tpl.label_default || tpl.name || "";
+}
+
+async function loadTemplates() {
+  try {
+    templatesCache = await API.request("/api/admin/license-templates");
+  } catch (err) {
+    templatesCache = [];
+    showAdminAlert(err.message);
+    return;
+  }
+  fillTemplateSelects();
+  renderTemplatesTable();
+}
+
+function fillTemplateSelects() {
+  const active = templatesCache.filter((t) => t.is_active);
+  const createSel = $("#template");
+  if (createSel) {
+    const current = createSel.value || "custom";
+    createSel.innerHTML =
+      `<option value="custom">Personalizada (sin plantilla)</option>` +
+      active
+        .map(
+          (t) =>
+            `<option value="${escape(t.slug)}">${escape(t.name)} (${escape(t.slug)})</option>`
+        )
+        .join("");
+    createSel.value = [...createSel.options].some((o) => o.value === current) ? current : "custom";
+  }
+  const editSel = $("#edit-template");
+  if (editSel) {
+    const cur = editSel.value || "";
+    editSel.innerHTML =
+      `<option value="">— no cambiar por plantilla —</option>` +
+      active
+        .map(
+          (t) =>
+            `<option value="${escape(t.slug)}">${escape(t.name)} · ${escape(t.hint || "")}</option>`
+        )
+        .join("");
+    if ([...editSel.options].some((o) => o.value === cur)) editSel.value = cur;
+  }
+  applyTemplateHints();
+}
+
+function renderTemplatesTable() {
+  const body = $("#templates-body");
+  if (!body) return;
+  if (!templatesCache.length) {
+    body.innerHTML = `<tr><td colspan="7" class="muted">Sin plantillas. Se crearán al arrancar o crea una aquí.</td></tr>`;
+    return;
+  }
+  body.innerHTML = templatesCache
+    .map((t) => {
+      const limit = t.limit_uses > 0 ? t.limit_uses : "∞";
+      const daily = t.daily_limit > 0 ? t.daily_limit : "∞";
+      return `<tr>
+        <td class="mono">${escape(t.slug)}${t.is_system ? ' <span class="badge badge-muted">sys</span>' : ""}</td>
+        <td><strong>${escape(t.name)}</strong><div class="muted">${escape(t.description || "")}</div></td>
+        <td><span class="badge badge-muted">${escape(t.license_type)}</span></td>
+        <td>${limit} global · ${daily}/día · ${t.max_devices} eq.</td>
+        <td>${t.duration_days}</td>
+        <td><span class="badge ${t.is_active ? "badge-ok" : "badge-err"}">${
+          t.is_active ? "activa" : "off"
+        }</span></td>
+        <td class="row-actions">
+          <button class="btn btn-sm btn-primary" type="button" data-action="tpl-edit" data-id="${escape(
+            t.id
+          )}">Editar</button>
+          <button class="btn btn-sm btn-ghost" type="button" data-action="tpl-toggle" data-id="${escape(
+            t.id
+          )}">${t.is_active ? "Desactivar" : "Activar"}</button>
+          <button class="btn btn-sm btn-ghost" type="button" data-action="tpl-delete" data-id="${escape(
+            t.id
+          )}">${t.is_system ? "Desactivar" : "Borrar"}</button>
+        </td>
+      </tr>`;
+    })
+    .join("");
+}
+
+function resetTemplateForm() {
+  $("#tpl-id").value = "";
+  $("#form-template")?.reset();
+  $("#tpl-count-global").checked = true;
+  $("#tpl-enforce-daily").checked = true;
+  $("#tpl-active").checked = true;
+  $("#tpl-limit").value = 500;
+  $("#tpl-daily").value = 50;
+  $("#tpl-days").value = 30;
+  $("#tpl-devices").value = 5;
+  $("#tpl-sort").value = 100;
+  $("#tpl-type").value = "standard";
+  if ($("#tpl-submit-btn")) $("#tpl-submit-btn").textContent = "Crear plantilla";
+}
+
+function editTemplateIntoForm(id) {
+  const t = templatesCache.find((x) => String(x.id) === String(id));
+  if (!t) return;
+  $("#tpl-id").value = t.id;
+  $("#tpl-name").value = t.name || "";
+  $("#tpl-slug").value = t.slug || "";
+  $("#tpl-slug").disabled = !!t.is_system;
+  $("#tpl-type").value = t.license_type || "standard";
+  $("#tpl-label").value = t.label_default || "";
+  $("#tpl-limit").value = t.limit_uses ?? 0;
+  $("#tpl-daily").value = t.daily_limit ?? 0;
+  $("#tpl-days").value = t.duration_days ?? 30;
+  $("#tpl-devices").value = t.max_devices ?? 5;
+  $("#tpl-sort").value = t.sort_order ?? 100;
+  $("#tpl-desc").value = t.description || "";
+  $("#tpl-count-global").checked = !!t.count_toward_global;
+  $("#tpl-enforce-daily").checked = !!t.enforce_daily_limit;
+  $("#tpl-active").checked = !!t.is_active;
+  if ($("#tpl-submit-btn")) $("#tpl-submit-btn").textContent = "Guardar plantilla";
+  // Ir a pestaña plantillas
+  const tab = document.querySelector('.tab[data-tab="templates"]');
+  tab?.click();
+  $("#form-template")?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function saveTemplateForm(e) {
+  e.preventDefault();
+  const id = $("#tpl-id").value;
+  const body = {
+    name: $("#tpl-name").value.trim(),
+    slug: $("#tpl-slug").value.trim() || undefined,
+    license_type: $("#tpl-type").value.trim() || "standard",
+    label_default: $("#tpl-label").value.trim() || $("#tpl-name").value.trim(),
+    description: $("#tpl-desc").value.trim(),
+    max_devices: numOrNull($("#tpl-devices").value) ?? 5,
+    limit_uses: numOrNull($("#tpl-limit").value) ?? 0,
+    daily_limit: numOrNull($("#tpl-daily").value) ?? 0,
+    duration_days: numOrNull($("#tpl-days").value) ?? 30,
+    sort_order: numOrNull($("#tpl-sort").value) ?? 100,
+    count_toward_global: $("#tpl-count-global").checked,
+    enforce_daily_limit: $("#tpl-enforce-daily").checked,
+    is_active: $("#tpl-active").checked,
   };
-  $("#template-hint").textContent = hints[t] || "";
+  if (!body.name) {
+    showAdminAlert("El nombre de la plantilla es obligatorio.");
+    return;
+  }
+  try {
+    if (id) {
+      // no enviar slug vacío en update de system
+      if ($("#tpl-slug").disabled) delete body.slug;
+      await API.request(`/api/admin/license-templates/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      });
+      showAdminAlert("Plantilla actualizada.", "ok");
+    } else {
+      await API.request("/api/admin/license-templates", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      showAdminAlert("Plantilla creada. Ya aparece al crear licencias.", "ok");
+    }
+    resetTemplateForm();
+    $("#tpl-slug").disabled = false;
+    await loadTemplates();
+  } catch (err) {
+    showAdminAlert(err.message);
+  }
+}
+
+async function toggleTemplateActive(id) {
+  const t = templatesCache.find((x) => String(x.id) === String(id));
+  if (!t) return;
+  await API.request(`/api/admin/license-templates/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ is_active: !t.is_active }),
+  });
+  await loadTemplates();
+}
+
+async function deleteTemplate(id) {
+  const t = templatesCache.find((x) => String(x.id) === String(id));
+  if (!t) return;
+  const msg = t.is_system
+    ? `¿Desactivar plantilla de sistema "${t.slug}"? (no se borra del todo)`
+    : `¿Eliminar plantilla "${t.slug}"?`;
+  if (!confirm(msg)) return;
+  await API.request(`/api/admin/license-templates/${id}`, { method: "DELETE" });
+  await loadTemplates();
+  showAdminAlert(t.is_system ? "Plantilla desactivada." : "Plantilla eliminada.", "ok");
 }
 
 async function createLicense(e) {
@@ -598,11 +779,31 @@ document.addEventListener("click", (e) => {
     $("#edit-note").value = $("#edit-note").value || `Extensión rápida +${days}d`;
   } else if (action === "quick-annual") {
     e.preventDefault();
-    $("#edit-template").value = "pro";
-    onEditTemplateChange();
+    const annual =
+      templatesCache.find((t) => t.slug === "pro" && t.is_active) ||
+      templatesCache.find((t) => (t.duration_days || 0) >= 365 && t.is_active);
+    if (annual) {
+      $("#edit-template").value = annual.slug;
+      onEditTemplateChange();
+    } else {
+      $("#edit-duration").value = "365";
+      $("#edit-type").value = "pro";
+    }
     $("#edit-expiry-policy").value = "replace_from_today";
-    $("#edit-duration").value = "365";
-    $("#edit-note").value = $("#edit-note").value || "Upgrade a plan anual (Pro)";
+    $("#edit-note").value = $("#edit-note").value || "Upgrade a plan anual";
+  } else if (action === "tpl-edit") {
+    e.preventDefault();
+    editTemplateIntoForm(id);
+  } else if (action === "tpl-toggle") {
+    e.preventDefault();
+    toggleTemplateActive(id);
+  } else if (action === "tpl-delete") {
+    e.preventDefault();
+    deleteTemplate(id);
+  } else if (action === "tpl-reset") {
+    e.preventDefault();
+    resetTemplateForm();
+    $("#tpl-slug").disabled = false;
   } else if (action === "toggle-user") {
     e.preventDefault();
     toggleUser(id);

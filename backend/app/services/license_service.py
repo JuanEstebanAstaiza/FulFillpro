@@ -13,17 +13,20 @@ from sqlalchemy.orm import Session, joinedload
 from backend.app.config import get_settings
 from backend.app.core.security import normalize_device_id
 from backend.app.models.device import Device
-from backend.app.models.license import License
+from backend.app.models.license import License, LicenseTemplate
 from backend.app.models.order import Order
 from backend.app.models.user import User
 from backend.app.redis_client import cache_delete, cache_get, cache_set
 from backend.app.services.audit_service import log_access, log_security
 
-# Plantillas de licencias predefinidas
-TEMPLATES: dict[str, dict[str, Any]] = {
-    "trial": {
-        "type": "trial",
-        "label": "Prueba gratuita",
+# Semilla inicial si la tabla de plantillas está vacía (luego se editan en Ops)
+DEFAULT_TEMPLATE_SEED: list[dict[str, Any]] = [
+    {
+        "slug": "trial",
+        "name": "Prueba gratuita",
+        "description": "7 días · 50 órdenes · 3/día",
+        "license_type": "trial",
+        "label_default": "Prueba gratuita",
         "max_devices": 3,
         "limit_uses": 50,
         "daily_limit": 3,
@@ -34,10 +37,15 @@ TEMPLATES: dict[str, dict[str, Any]] = {
         "analytics_weeks_retention": 4,
         "analytics_max_events_per_week": 5000,
         "analytics_storage_mb": 50,
+        "sort_order": 10,
+        "is_system": True,
     },
-    "standard": {
-        "type": "standard",
-        "label": "Plan Standard",
+    {
+        "slug": "standard",
+        "name": "Standard (mensual)",
+        "description": "30 días · 500 órdenes · 50/día",
+        "license_type": "standard",
+        "label_default": "Plan Standard",
         "max_devices": 5,
         "limit_uses": 500,
         "daily_limit": 50,
@@ -48,12 +56,17 @@ TEMPLATES: dict[str, dict[str, Any]] = {
         "analytics_weeks_retention": 12,
         "analytics_max_events_per_week": 30000,
         "analytics_storage_mb": 200,
+        "sort_order": 20,
+        "is_system": True,
     },
-    "pro": {
-        "type": "pro",
-        "label": "Plan Pro",
+    {
+        "slug": "pro",
+        "name": "Pro (anual)",
+        "description": "365 días · ilimitado global · 200/día",
+        "license_type": "pro",
+        "label_default": "Plan Pro",
         "max_devices": 15,
-        "limit_uses": 0,  # ilimitado
+        "limit_uses": 0,
         "daily_limit": 200,
         "duration_days": 365,
         "count_toward_global": True,
@@ -62,10 +75,15 @@ TEMPLATES: dict[str, dict[str, Any]] = {
         "analytics_weeks_retention": 26,
         "analytics_max_events_per_week": 100000,
         "analytics_storage_mb": 500,
+        "sort_order": 30,
+        "is_system": True,
     },
-    "enterprise": {
-        "type": "enterprise",
-        "label": "Plan Enterprise",
+    {
+        "slug": "enterprise",
+        "name": "Enterprise",
+        "description": "365 días · ilimitado · sin tope diario",
+        "license_type": "enterprise",
+        "label_default": "Plan Enterprise",
         "max_devices": 999,
         "limit_uses": 0,
         "daily_limit": 0,
@@ -76,8 +94,269 @@ TEMPLATES: dict[str, dict[str, Any]] = {
         "analytics_weeks_retention": 52,
         "analytics_max_events_per_week": 500000,
         "analytics_storage_mb": 2000,
+        "sort_order": 40,
+        "is_system": True,
     },
+]
+
+# Compat: algunos callers antiguos importan TEMPLATES (mapa estático de fallback)
+TEMPLATES: dict[str, dict[str, Any]] = {
+    row["slug"]: {
+        "type": row["license_type"],
+        "label": row["label_default"],
+        "max_devices": row["max_devices"],
+        "limit_uses": row["limit_uses"],
+        "daily_limit": row["daily_limit"],
+        "duration_days": row["duration_days"],
+        "count_toward_global": row["count_toward_global"],
+        "enforce_daily_limit": row["enforce_daily_limit"],
+        "analytics_enabled": row["analytics_enabled"],
+        "analytics_weeks_retention": row["analytics_weeks_retention"],
+        "analytics_max_events_per_week": row["analytics_max_events_per_week"],
+        "analytics_storage_mb": row["analytics_storage_mb"],
+    }
+    for row in DEFAULT_TEMPLATE_SEED
 }
+
+
+def _slugify(value: str) -> str:
+    raw = (value or "").strip().lower()
+    out = []
+    for ch in raw:
+        if ch.isalnum():
+            out.append(ch)
+        elif ch in {" ", "-", "_", "."}:
+            out.append("-")
+    slug = "".join(out).strip("-")
+    while "--" in slug:
+        slug = slug.replace("--", "-")
+    return slug[:64] or secrets.token_hex(4)
+
+
+def template_to_apply_dict(tpl: LicenseTemplate) -> dict[str, Any]:
+    """Formato usado al crear/cambiar licencia desde plantilla."""
+    return {
+        "type": tpl.license_type or tpl.slug,
+        "label": tpl.label_default or tpl.name,
+        "max_devices": int(tpl.max_devices or 3),
+        "limit_uses": int(tpl.limit_uses or 0),
+        "daily_limit": int(tpl.daily_limit or 0),
+        "duration_days": int(tpl.duration_days or 30),
+        "count_toward_global": bool(tpl.count_toward_global),
+        "enforce_daily_limit": bool(tpl.enforce_daily_limit),
+        "analytics_enabled": bool(tpl.analytics_enabled),
+        "analytics_weeks_retention": int(tpl.analytics_weeks_retention or 12),
+        "analytics_max_events_per_week": int(tpl.analytics_max_events_per_week or 50000),
+        "analytics_storage_mb": int(tpl.analytics_storage_mb or 200),
+        "features": dict(tpl.features or {}),
+    }
+
+
+def template_to_dict(tpl: LicenseTemplate) -> dict[str, Any]:
+    return {
+        "id": str(tpl.id),
+        "slug": tpl.slug,
+        "name": tpl.name,
+        "description": tpl.description or "",
+        "license_type": tpl.license_type,
+        "label_default": tpl.label_default or "",
+        "max_devices": tpl.max_devices,
+        "limit_uses": tpl.limit_uses,
+        "daily_limit": tpl.daily_limit,
+        "duration_days": tpl.duration_days,
+        "count_toward_global": bool(tpl.count_toward_global),
+        "enforce_daily_limit": bool(tpl.enforce_daily_limit),
+        "analytics_enabled": bool(tpl.analytics_enabled),
+        "analytics_weeks_retention": int(tpl.analytics_weeks_retention or 12),
+        "analytics_max_events_per_week": int(tpl.analytics_max_events_per_week or 50000),
+        "analytics_storage_mb": int(tpl.analytics_storage_mb or 200),
+        "features": tpl.features or {},
+        "is_active": bool(tpl.is_active),
+        "sort_order": int(tpl.sort_order or 0),
+        "is_system": bool(tpl.is_system),
+        "created_at": tpl.created_at.isoformat() if tpl.created_at else None,
+        "updated_at": tpl.updated_at.isoformat() if tpl.updated_at else None,
+        # alias cómodo para UI de creación
+        "hint": (
+            f"{tpl.duration_days or 0} días · "
+            f"{'∞' if not tpl.limit_uses else tpl.limit_uses} órdenes · "
+            f"{'∞' if not tpl.daily_limit else tpl.daily_limit}/día"
+        ),
+    }
+
+
+def seed_license_templates(db: Session) -> int:
+    """Crea plantillas por defecto si no existen (por slug). No pisa ediciones del admin."""
+    created = 0
+    for row in DEFAULT_TEMPLATE_SEED:
+        exists = db.query(LicenseTemplate).filter(LicenseTemplate.slug == row["slug"]).first()
+        if exists:
+            continue
+        db.add(
+            LicenseTemplate(
+                slug=row["slug"],
+                name=row["name"],
+                description=row.get("description") or "",
+                license_type=row["license_type"],
+                label_default=row.get("label_default") or row["name"],
+                max_devices=row["max_devices"],
+                limit_uses=row["limit_uses"],
+                daily_limit=row["daily_limit"],
+                duration_days=row["duration_days"],
+                count_toward_global=row["count_toward_global"],
+                enforce_daily_limit=row["enforce_daily_limit"],
+                analytics_enabled=row.get("analytics_enabled", True),
+                analytics_weeks_retention=row.get("analytics_weeks_retention", 12),
+                analytics_max_events_per_week=row.get("analytics_max_events_per_week", 50000),
+                analytics_storage_mb=row.get("analytics_storage_mb", 200),
+                features={},
+                is_active=True,
+                sort_order=row.get("sort_order", 100),
+                is_system=bool(row.get("is_system", True)),
+            )
+        )
+        created += 1
+    if created:
+        db.commit()
+    return created
+
+
+def list_templates(db: Session, *, active_only: bool = False) -> list[LicenseTemplate]:
+    q = db.query(LicenseTemplate)
+    if active_only:
+        q = q.filter(LicenseTemplate.is_active.is_(True))
+    return q.order_by(LicenseTemplate.sort_order.asc(), LicenseTemplate.name.asc()).all()
+
+
+def get_template_by_slug(db: Session, slug: str) -> Optional[LicenseTemplate]:
+    if not slug:
+        return None
+    return (
+        db.query(LicenseTemplate)
+        .filter(LicenseTemplate.slug == slug.strip().lower())
+        .first()
+    )
+
+
+def resolve_template_payload(db: Session, slug: str) -> Optional[dict[str, Any]]:
+    """Resuelve plantilla desde BD; fallback a DEFAULT_TEMPLATE_SEED."""
+    tpl = get_template_by_slug(db, slug)
+    if tpl:
+        if not tpl.is_active:
+            raise HTTPException(400, f"La plantilla '{slug}' está desactivada.")
+        return template_to_apply_dict(tpl)
+    # fallback estático
+    if slug in TEMPLATES:
+        return TEMPLATES[slug].copy()
+    return None
+
+
+def create_template(db: Session, data: dict) -> LicenseTemplate:
+    slug = _slugify(data.get("slug") or data.get("name") or "")
+    if not slug:
+        raise HTTPException(400, "Slug o nombre de plantilla requerido.")
+    if db.query(LicenseTemplate).filter(LicenseTemplate.slug == slug).first():
+        raise HTTPException(400, f"Ya existe una plantilla con slug '{slug}'.")
+
+    tpl = LicenseTemplate(
+        slug=slug,
+        name=(data.get("name") or slug).strip(),
+        description=(data.get("description") or "").strip(),
+        license_type=(data.get("license_type") or data.get("type") or slug)[:32],
+        label_default=(data.get("label_default") or data.get("label") or data.get("name") or slug).strip(),
+        max_devices=int(data.get("max_devices") if data.get("max_devices") is not None else 5),
+        limit_uses=int(data.get("limit_uses") if data.get("limit_uses") is not None else 0),
+        daily_limit=int(data.get("daily_limit") if data.get("daily_limit") is not None else 0),
+        duration_days=int(data.get("duration_days") if data.get("duration_days") is not None else 30),
+        count_toward_global=bool(data.get("count_toward_global", True)),
+        enforce_daily_limit=bool(data.get("enforce_daily_limit", True)),
+        analytics_enabled=bool(data.get("analytics_enabled", True)),
+        analytics_weeks_retention=int(data.get("analytics_weeks_retention") or 12),
+        analytics_max_events_per_week=int(data.get("analytics_max_events_per_week") or 50000),
+        analytics_storage_mb=int(data.get("analytics_storage_mb") or 200),
+        features=data.get("features") or {},
+        is_active=bool(data.get("is_active", True)),
+        sort_order=int(data.get("sort_order") if data.get("sort_order") is not None else 100),
+        is_system=False,
+    )
+    db.add(tpl)
+    db.commit()
+    db.refresh(tpl)
+    return tpl
+
+
+def update_template(db: Session, tpl: LicenseTemplate, data: dict) -> LicenseTemplate:
+    # slug: solo si no es system o se permite renombrar custom
+    if "slug" in data and data["slug"] is not None:
+        new_slug = _slugify(str(data["slug"]))
+        if new_slug != tpl.slug:
+            if tpl.is_system:
+                raise HTTPException(400, "No se puede renombrar el slug de una plantilla de sistema.")
+            if db.query(LicenseTemplate).filter(LicenseTemplate.slug == new_slug).first():
+                raise HTTPException(400, f"Ya existe la plantilla '{new_slug}'.")
+            tpl.slug = new_slug
+
+    field_map = {
+        "name": "name",
+        "description": "description",
+        "license_type": "license_type",
+        "type": "license_type",
+        "label_default": "label_default",
+        "label": "label_default",
+        "max_devices": "max_devices",
+        "limit_uses": "limit_uses",
+        "daily_limit": "daily_limit",
+        "duration_days": "duration_days",
+        "count_toward_global": "count_toward_global",
+        "enforce_daily_limit": "enforce_daily_limit",
+        "analytics_enabled": "analytics_enabled",
+        "analytics_weeks_retention": "analytics_weeks_retention",
+        "analytics_max_events_per_week": "analytics_max_events_per_week",
+        "analytics_storage_mb": "analytics_storage_mb",
+        "features": "features",
+        "is_active": "is_active",
+        "sort_order": "sort_order",
+    }
+    for src, dest in field_map.items():
+        if src in data and data[src] is not None:
+            val = data[src]
+            if dest in {
+                "max_devices",
+                "limit_uses",
+                "daily_limit",
+                "duration_days",
+                "analytics_weeks_retention",
+                "analytics_max_events_per_week",
+                "analytics_storage_mb",
+                "sort_order",
+            }:
+                val = int(val)
+            elif dest in {
+                "count_toward_global",
+                "enforce_daily_limit",
+                "analytics_enabled",
+                "is_active",
+            }:
+                val = bool(val)
+            elif dest in {"name", "description", "license_type", "label_default"}:
+                val = str(val).strip()
+            setattr(tpl, dest, val)
+
+    tpl.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(tpl)
+    return tpl
+
+
+def delete_template(db: Session, tpl: LicenseTemplate) -> None:
+    if tpl.is_system:
+        # Las de sistema se desactivan en lugar de borrar (evita romper referencias históricas)
+        tpl.is_active = False
+        tpl.updated_at = datetime.utcnow()
+        db.commit()
+        return
+    db.delete(tpl)
+    db.commit()
 
 
 def generate_license_code(prefix: str = "FP") -> str:
@@ -168,9 +447,14 @@ def create_license(db: Session, data: dict) -> License:
     template_name = payload.pop("template", None)
     duration_days = payload.pop("duration_days", None)
 
-    if template_name and template_name in TEMPLATES:
-        base = TEMPLATES[template_name].copy()
+    if template_name and template_name not in {"", "custom"}:
+        base = resolve_template_payload(db, str(template_name).strip().lower())
+        if not base:
+            raise HTTPException(400, f"Plantilla desconocida: {template_name}")
         tpl_duration = base.pop("duration_days", None)
+        # label vacío del form → usar default de plantilla
+        if not (payload.get("label") or "").strip() and base.get("label"):
+            payload["label"] = base["label"]
         for k, v in base.items():
             payload.setdefault(k, v)
         if duration_days is None:
@@ -185,6 +469,10 @@ def create_license(db: Session, data: dict) -> License:
         expiry = date.today() + timedelta(days=int(duration_days))
 
     owner_id = payload.get("owner_user_id")
+    features = dict(payload.get("features") or {})
+    if template_name and template_name not in {"", "custom"}:
+        features.setdefault("created_from_template", str(template_name).strip().lower())
+
     lic = License(
         code=code,
         label=payload.get("label", ""),
@@ -203,7 +491,7 @@ def create_license(db: Session, data: dict) -> License:
         analytics_storage_mb=int(payload.get("analytics_storage_mb") or 200),
         count_toward_global=payload.get("count_toward_global", True),
         enforce_daily_limit=payload.get("enforce_daily_limit", True),
-        features=payload.get("features") or {},
+        features=features,
         notes=payload.get("notes", ""),
         assigned_at=datetime.utcnow() if owner_id else None,
     )
@@ -302,15 +590,16 @@ def update_license(db: Session, lic: License, data: dict) -> License:
     before = _snapshot_license(lic)
 
     apply_template = payload.pop("apply_template", None) or payload.pop("template", None)
-    if apply_template and apply_template in TEMPLATES:
-        base = TEMPLATES[apply_template].copy()
+    if apply_template and apply_template not in {"", "custom"}:
+        base = resolve_template_payload(db, str(apply_template).strip().lower())
+        if not base:
+            raise HTTPException(400, f"Plantilla desconocida: {apply_template}")
         tpl_duration = base.pop("duration_days", None)
-        # No pisar campos ya enviados explícitamente
         for k, v in base.items():
             payload.setdefault(k, v)
         if payload.get("duration_days") is None and tpl_duration is not None:
             payload.setdefault("duration_days", tpl_duration)
-        payload.setdefault("type", apply_template if apply_template != "custom" else lic.type)
+        payload.setdefault("type", base.get("type") or apply_template)
 
     extend_days = payload.pop("extend_days", None)
     duration_days = payload.pop("duration_days", None)
@@ -413,8 +702,10 @@ def change_plan(db: Session, lic: License, data: dict) -> License:
             payload["expiry_policy"] = "set_absolute"
         else:
             # Si hay template con duración implícita vía apply_template
-            if template and template in TEMPLATES and apply_quotas:
-                payload.setdefault("duration_days", TEMPLATES[template].get("duration_days"))
+            if template and apply_quotas:
+                resolved = resolve_template_payload(db, str(template).strip().lower())
+                if resolved and resolved.get("duration_days"):
+                    payload.setdefault("duration_days", resolved["duration_days"])
                 payload["expiry_policy"] = "replace_from_today"
             else:
                 payload["expiry_policy"] = "keep"

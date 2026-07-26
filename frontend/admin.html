@@ -21,6 +21,7 @@
         <button class="tab nav-item active" data-tab="overview" type="button"><span class="ico">◈</span> Monitoreo</button>
         <button class="tab nav-item" data-tab="usage" type="button"><span class="ico">▣</span> Uso empresas</button>
         <button class="tab nav-item" data-tab="licenses" type="button"><span class="ico">▤</span> Licencias</button>
+        <button class="tab nav-item" data-tab="templates" type="button"><span class="ico">▦</span> Plantillas</button>
         <button class="tab nav-item" data-tab="users" type="button"><span class="ico">◎</span> Usuarios</button>
         <button class="tab nav-item" data-tab="logs" type="button"><span class="ico">☰</span> Logs</button>
         <button class="tab nav-item" data-tab="incidents" type="button"><span class="ico">!</span> Incidentes</button>
@@ -88,13 +89,9 @@
                 <div class="field">
                   <label for="template">Plantilla</label>
                   <select id="template">
-                    <option value="trial">Prueba gratuita</option>
-                    <option value="standard">Standard</option>
-                    <option value="pro">Pro</option>
-                    <option value="enterprise">Enterprise</option>
-                    <option value="custom">Personalizada</option>
+                    <option value="custom">Personalizada (sin plantilla)</option>
                   </select>
-                  <div id="template-hint" class="hint">50 órdenes · 3/día · 7 días</div>
+                  <div id="template-hint" class="hint">Elige una plantilla de la pestaña Plantillas</div>
                 </div>
                 <div class="field">
                   <label for="lic-code">Código (opcional)</label>
@@ -161,6 +158,93 @@
           </div>
         </section>
 
+        <section data-panel="templates" class="hidden">
+          <div class="card">
+            <h2>Plantillas de plan</h2>
+            <p class="lead">
+              Define los planes predeterminados (mensual, anual, trial…) y créalos como plantillas.
+              Al <strong>crear una licencia</strong> o <strong>cambiar plan</strong>, se usan estos valores.
+              Editar una plantilla <em>no</em> cambia licencias ya emitidas (solo las nuevas / upgrades que elijas).
+            </p>
+            <form id="form-template">
+              <input type="hidden" id="tpl-id" value="" />
+              <div class="grid-2">
+                <div class="field">
+                  <label for="tpl-name">Nombre visible</label>
+                  <input id="tpl-name" required placeholder="Anual Premium" />
+                </div>
+                <div class="field">
+                  <label for="tpl-slug">Slug (id interno)</label>
+                  <input id="tpl-slug" class="mono" placeholder="anual-premium (opcional)" />
+                  <div class="hint">Solo minúsculas/guiones. Vacío = se genera del nombre.</div>
+                </div>
+                <div class="field">
+                  <label for="tpl-type">Tipo en licencia</label>
+                  <input id="tpl-type" placeholder="standard / pro / custom…" value="standard" />
+                </div>
+                <div class="field">
+                  <label for="tpl-label">Etiqueta por defecto</label>
+                  <input id="tpl-label" placeholder="Plan Anual Premium" />
+                </div>
+                <div class="field">
+                  <label for="tpl-limit">Límite global (0 = ∞)</label>
+                  <input id="tpl-limit" type="number" min="0" value="500" />
+                </div>
+                <div class="field">
+                  <label for="tpl-daily">Límite diario (0 = ∞)</label>
+                  <input id="tpl-daily" type="number" min="0" value="50" />
+                </div>
+                <div class="field">
+                  <label for="tpl-days">Duración (días)</label>
+                  <input id="tpl-days" type="number" min="1" value="30" />
+                </div>
+                <div class="field">
+                  <label for="tpl-devices">Máx. equipos</label>
+                  <input id="tpl-devices" type="number" min="1" value="5" />
+                </div>
+                <div class="field">
+                  <label for="tpl-sort">Orden en listas</label>
+                  <input id="tpl-sort" type="number" value="100" />
+                </div>
+                <div class="field">
+                  <label for="tpl-desc">Descripción / hint</label>
+                  <input id="tpl-desc" placeholder="30 días · ideal para PYMES" />
+                </div>
+              </div>
+              <div class="field">
+                <label><input id="tpl-count-global" type="checkbox" checked style="width:auto;margin-right:0.4rem" /> Contar en cupo global</label>
+              </div>
+              <div class="field">
+                <label><input id="tpl-enforce-daily" type="checkbox" checked style="width:auto;margin-right:0.4rem" /> Aplicar límite diario</label>
+              </div>
+              <div class="field">
+                <label><input id="tpl-active" type="checkbox" checked style="width:auto;margin-right:0.4rem" /> Plantilla activa (aparece al crear licencias)</label>
+              </div>
+              <div class="row-actions" style="gap:0.5rem;flex-wrap:wrap">
+                <button class="btn btn-primary" type="submit" id="tpl-submit-btn">Crear plantilla</button>
+                <button class="btn btn-ghost" type="button" id="tpl-reset-btn" data-action="tpl-reset">Limpiar formulario</button>
+              </div>
+            </form>
+          </div>
+          <div class="card">
+            <h2>Plantillas configuradas</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Slug</th>
+                  <th>Nombre</th>
+                  <th>Tipo</th>
+                  <th>Cupos</th>
+                  <th>Días</th>
+                  <th>Estado</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="templates-body"></tbody>
+            </table>
+          </div>
+        </section>
+
         <!-- Modal editar / cambiar plan (CSP: sin scripts inline) -->
         <div id="lic-edit-overlay" class="legal-overlay hidden" aria-hidden="true">
           <div class="legal-panel" style="max-width:640px">
@@ -179,10 +263,6 @@
                   <label for="edit-template">Aplicar plantilla (opcional)</label>
                   <select id="edit-template">
                     <option value="">— no cambiar por plantilla —</option>
-                    <option value="trial">Trial (7 días)</option>
-                    <option value="standard">Standard / mensual (30 días)</option>
-                    <option value="pro">Pro / anual (365 días)</option>
-                    <option value="enterprise">Enterprise (365 días)</option>
                   </select>
                   <div class="hint">Al elegir plantilla se cargan cupos y duración típicos. Puedes ajustar abajo.</div>
                 </div>

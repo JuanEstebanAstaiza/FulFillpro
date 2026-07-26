@@ -36,7 +36,7 @@ from backend.app.models.analytics import (
 from backend.app.models.audit import AccessLog, SecurityEvent
 from backend.app.models.device import Device
 from backend.app.models.legal import LegalDocument, UserConsent
-from backend.app.models.license import License
+from backend.app.models.license import License, LicenseTemplate
 from backend.app.models.order import Order, OrderFile
 from backend.app.models.user import User
 from backend.app.services import storage_service
@@ -48,6 +48,7 @@ APP_NAME = "FulfillPro"
 TABLE_MODELS: list[tuple[str, Any]] = [
     ("users", User),
     ("legal_documents", LegalDocument),
+    ("license_templates", LicenseTemplate),
     ("licenses", License),
     ("devices", Device),
     ("orders", Order),
@@ -72,6 +73,7 @@ CLEAR_ORDER = [
     "orders",
     "devices",
     "licenses",
+    "license_templates",
     "legal_documents",
     "users",
 ]

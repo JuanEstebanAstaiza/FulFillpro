@@ -71,3 +71,43 @@ class License(Base):
     owner = relationship("User", back_populates="licenses", foreign_keys=[owner_user_id])
     devices = relationship("Device", back_populates="license", cascade="all, delete-orphan")
     orders = relationship("Order", back_populates="license")
+
+
+class LicenseTemplate(Base):
+    """
+    Plantilla de plan editable desde Ops.
+    Al crear una licencia o cambiar de plan se copian estos cupos/duración.
+    """
+
+    __tablename__ = "license_templates"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    # Identificador estable usado en formularios: trial, standard, mensual-2026…
+    slug = Column(String(64), unique=True, nullable=False, index=True)
+    name = Column(String(255), nullable=False, default="")
+    description = Column(Text, default="")
+    # Valor que se escribe en licenses.type
+    license_type = Column(String(32), default="standard")
+    label_default = Column(String(255), default="")
+
+    max_devices = Column(Integer, default=5)
+    limit_uses = Column(Integer, default=0)
+    daily_limit = Column(Integer, default=0)
+    duration_days = Column(Integer, default=30)
+
+    count_toward_global = Column(Boolean, default=True)
+    enforce_daily_limit = Column(Boolean, default=True)
+
+    analytics_enabled = Column(Boolean, default=True)
+    analytics_weeks_retention = Column(Integer, default=12)
+    analytics_max_events_per_week = Column(Integer, default=50000)
+    analytics_storage_mb = Column(Integer, default=200)
+
+    features = Column(JSON().with_variant(JSONB(), "postgresql"), default=dict)
+    is_active = Column(Boolean, default=True)
+    sort_order = Column(Integer, default=100)
+    # Plantillas sembradas del sistema (se pueden editar; no se borran por defecto)
+    is_system = Column(Boolean, default=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

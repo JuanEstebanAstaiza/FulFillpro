@@ -96,6 +96,14 @@ def seed_database() -> None:
     storage_service.ensure_storage_root()
     with SessionLocal() as db:
         legal_service.seed_legal_documents(db)
+        try:
+            from backend.app.services import license_service as _lic_svc
+
+            n = _lic_svc.seed_license_templates(db)
+            if n:
+                pass  # plantillas iniciales creadas
+        except Exception:
+            pass
 
         admin = db.query(User).filter(User.email == settings.admin_email.lower()).first()
         if not admin:
