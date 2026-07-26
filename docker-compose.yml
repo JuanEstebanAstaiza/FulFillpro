@@ -87,7 +87,7 @@ services:
       STORAGE_MAX_GB: ${STORAGE_MAX_GB:-100}
       # Tomados del .env (sin pisar production con development)
       APP_ENV: ${APP_ENV:-production}
-      CORS_ORIGINS: ${CORS_ORIGINS:-https://localhost}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://fulfillpro.app,https://www.fulfillpro.app}
       SEED_DEMO_USERS: ${SEED_DEMO_USERS:-false}
       ALLOW_PUBLIC_REGISTER: ${ALLOW_PUBLIC_REGISTER:-false}
       JWT_SECRET: ${JWT_SECRET}

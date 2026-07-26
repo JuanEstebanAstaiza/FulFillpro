@@ -21,9 +21,16 @@ docker compose up --build
 
 ## Despliegue en servidor (Proxmox + Debian + Cloudflared)
 
-Instructivo completo para VM local, Docker en producción y publicación HTTPS con dominio propio (sin abrir puertos):
+Instructivo completo para VM local, Docker en producción, dominio **https://fulfillpro.app** (sin abrir puertos) y **arranque automático** al prender el servidor:
 
 → [`Documentacion/Instructivo_Despliegue_Proxmox_Docker_Cloudflared.md`](Documentacion/Instructivo_Despliegue_Proxmox_Docker_Cloudflared.md)
+
+Arranque automático rápido en la VM:
+
+```bash
+cd /opt/fulfillpro
+sudo bash deploy/install-autostart.sh
+```
 
 - App empresas: http://localhost:8000  
 - **Ops (login oculto plataforma):** http://localhost:8000/ops  

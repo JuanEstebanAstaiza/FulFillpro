@@ -9,7 +9,8 @@ Guía paso a paso para levantar **FulfillPro** en un servidor local (homelab / o
 | Contenedores | **Docker + Docker Compose** |
 | Exposición a Internet | **Cloudflare Tunnel (`cloudflared`)** + dominio propio |
 
-> **Objetivo:** la app queda accesible en `https://tu-dominio.com` **sin abrir puertos** en el router (no hace falta reenvío 80/443).
+> **Objetivo:** la app queda accesible en **`https://fulfillpro.app`** (Cloudflare Tunnel) **sin abrir puertos** en el router (no hace falta reenvío 80/443).  
+> Al **encender la VM**, Docker y el stack FulfillPro deben levantarse solos (ver §4.8).
 
 ---
 
@@ -330,7 +331,7 @@ MAX_UPLOAD_MB=25
 # ── Producción ──
 APP_ENV=production
 # Dominio público HTTPS vía Cloudflare Tunnel
-CORS_ORIGINS=https://app.tu-dominio.com,https://tu-dominio.com
+CORS_ORIGINS=https://fulfillpro.app,https://www.fulfillpro.app
 ALLOW_PUBLIC_REGISTER=false
 SEED_DEMO_USERS=false
 
@@ -401,29 +402,16 @@ nano docker-compose.yml
 
 En `api.environment` deja / añade:
 
-```yaml
-APP_ENV: production
-SEED_DEMO_USERS: "false"
-ALLOW_PUBLIC_REGISTER: "false"
-CORS_ORIGINS: "https://app.tu-dominio.com"
-# DATABASE_URL y REDIS_URL ya internos
+El `docker-compose.yml` del repo ya toma `APP_ENV`, `CORS_ORIGINS`, secretos, etc. desde el **`.env`**.  
+No hace falta pisar a mano `development` en el compose.
+
+CORS de producción (ya en `.env` del repo):
+
+```env
+CORS_ORIGINS=https://fulfillpro.app,https://www.fulfillpro.app
 ```
 
-O crea `docker-compose.override.yml` (no lo subas a Git con secretos):
-
-```yaml
-services:
-  api:
-    environment:
-      APP_ENV: production
-      SEED_DEMO_USERS: "false"
-      ALLOW_PUBLIC_REGISTER: "false"
-      CORS_ORIGINS: "https://app.tu-dominio.com"
-    ports:
-      - "127.0.0.1:8000:8000"   # solo localhost (Cloudflared en la misma VM)
-```
-
-> Enlazar `127.0.0.1:8000` es **más seguro** que `0.0.0.0:8000` si solo Cloudflared debe hablar con la API.
+> El puerto de la API está enlazado a `127.0.0.1:8000` (solo localhost). Cloudflared habla con ese puerto; no abras 8000 a Internet.
 
 ### 4.5 Crear carpeta de storage y permisos
 
@@ -469,13 +457,120 @@ docker compose up -d --scale worker=2
 # En cada worker conviene WORKER_CONCURRENCY=2 o 3
 ```
 
-### 4.8 Primer login (solo LAN / tunnel)
+### 4.8 Arranque automático al prender el servidor (obligatorio en producción)
+
+Sin esto, al reiniciar la VM de Proxmox **Docker puede quedar parado** o los contenedores no se recrean.  
+Configura **dos capas**:
+
+| Capa | Qué hace |
+|------|----------|
+| `docker.service` | Motor Docker al boot |
+| `fulfillpro.service` | `docker compose up -d` del stack en `/opt/fulfillpro` |
+
+Los servicios del compose ya tienen `restart: unless-stopped` (si Docker arranca, los contenedores se reponen).  
+La unidad `fulfillpro` asegura el `compose up` completo tras un reboot limpio.
+
+#### Opción A — script del repo (recomendado)
+
+```bash
+cd /opt/fulfillpro
+git pull
+sudo bash deploy/install-autostart.sh
+```
+
+Comprueba:
+
+```bash
+systemctl is-enabled docker fulfillpro
+systemctl status fulfillpro --no-pager
+docker compose ps
+```
+
+#### Opción B — a mano con systemd
+
+```bash
+# 1) Docker al boot
+sudo systemctl enable --now docker
+
+# 2) Unidad del stack
+sudo cp /opt/fulfillpro/deploy/systemd/fulfillpro.service /etc/systemd/system/fulfillpro.service
+# Si el proyecto NO está en /opt/fulfillpro, edita WorkingDirectory en el .service
+sudo nano /etc/systemd/system/fulfillpro.service
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now fulfillpro.service
+sudo systemctl status fulfillpro
+```
+
+Contenido de referencia (`deploy/systemd/fulfillpro.service`):
+
+```ini
+[Unit]
+Description=FulfillPro Docker Compose stack
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/fulfillpro
+ExecStart=/usr/bin/docker compose up -d --remove-orphans
+ExecStop=/usr/bin/docker compose down
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Si solo tienes el binario antiguo `docker-compose` (con guion):
+
+```bash
+sudo sed -i 's|/usr/bin/docker compose|/usr/local/bin/docker-compose|g' \
+  /etc/systemd/system/fulfillpro.service
+sudo systemctl daemon-reload
+sudo systemctl restart fulfillpro
+```
+
+#### Probar que sobrevive un reinicio
+
+```bash
+sudo reboot
+# tras volver a entrar por SSH:
+systemctl is-active docker fulfillpro
+docker compose -f /opt/fulfillpro/docker-compose.yml ps
+curl -s http://127.0.0.1:8000/api/health
+```
+
+Debes ver contenedores `Up` / `healthy` sin haber ejecutado `compose up` a mano.
+
+#### Comandos útiles del servicio
+
+```bash
+sudo systemctl start fulfillpro      # levantar stack
+sudo systemctl stop fulfillpro       # docker compose down
+sudo systemctl restart fulfillpro    # recrear stack
+journalctl -u fulfillpro -n 50 --no-pager
+```
+
+> **Orden de arranque recomendado:** `docker` → `fulfillpro` → `cloudflared`  
+> El servicio de cloudflared ya declara `After=docker.service`; si quieres esperar al stack:
+>
+> ```bash
+> sudo systemctl edit cloudflared
+> # añade:
+> # [Unit]
+> # After=fulfillpro.service
+> # Requires=fulfillpro.service
+> ```
+
+### 4.9 Primer login (solo LAN / tunnel)
 
 | Uso | URL | Notas |
 |-----|-----|--------|
-| App empresas | `https://app.tu-dominio.com/` | Tras Cloudflared |
-| Ops (plataforma) | `https://app.tu-dominio.com/ops` | Ruta oculta admin |
-| Health | `https://app.tu-dominio.com/api/health` | Monitoreo |
+| App empresas | `https://fulfillpro.app/` | Tras Cloudflared |
+| Ops (plataforma) | `https://fulfillpro.app/ops` | Ruta oculta admin |
+| Health | `https://fulfillpro.app/api/health` | Monitoreo |
 
 Credenciales: las de `ADMIN_EMAIL` / `ADMIN_PASSWORD` del `.env`.
 
@@ -549,20 +644,18 @@ Anota el **Tunnel ID** (UUID) que imprime. También crea `~/.cloudflared/<TUNNEL
 
 ### 5.4 Enrutar DNS del dominio al túnel
 
-Sustituye `app.tu-dominio.com` y el UUID:
+Dominio de producción: **fulfillpro.app**
 
 ```bash
-cloudflared tunnel route dns fulfillpro app.tu-dominio.com
+# Apex (recomendado si la app vive en https://fulfillpro.app)
+cloudflared tunnel route dns fulfillpro fulfillpro.app
+
+# Opcional: www
+cloudflared tunnel route dns fulfillpro www.fulfillpro.app
 ```
 
-Eso crea un registro **CNAME** en Cloudflare apuntando al túnel.  
-Si prefieres el apex (`tu-dominio.com`):
-
-```bash
-cloudflared tunnel route dns fulfillpro tu-dominio.com
-```
-
-> En el apex a veces Cloudflare usa CNAME aplanado (CNAME flattening); el comando de cloudflared suele bastar.
+Eso crea registros **CNAME** en Cloudflare apuntando al túnel.  
+En el apex Cloudflare suele aplicar *CNAME flattening*.
 
 ### 5.5 Configuración del túnel
 
@@ -571,25 +664,24 @@ mkdir -p ~/.cloudflared
 nano ~/.cloudflared/config.yml
 ```
 
-Contenido (ajusta UUID, dominio y ruta de credenciales):
+Contenido (ajusta UUID y ruta de credenciales; hostname = **fulfillpro.app**):
 
 ```yaml
 tunnel: FULFILLPRO_TUNNEL_UUID
 credentials-file: /home/TU_USUARIO/.cloudflared/FULFILLPRO_TUNNEL_UUID.json
 
 ingress:
-  # App principal
-  - hostname: app.tu-dominio.com
+  - hostname: fulfillpro.app
     service: http://127.0.0.1:8000
     originRequest:
-      # Subidas Excel (hasta MAX_UPLOAD_MB)
       connectTimeout: 30s
-      # Evita timeouts largos en process/polling
       noTLSVerify: true
 
-  # (Opcional) mismo origen en apex
-  # - hostname: tu-dominio.com
-  #   service: http://127.0.0.1:8000
+  - hostname: www.fulfillpro.app
+    service: http://127.0.0.1:8000
+    originRequest:
+      connectTimeout: 30s
+      noTLSVerify: true
 
   # Catch-all obligatorio
   - service: http_status:404
@@ -603,7 +695,7 @@ cloudflared tunnel --config ~/.cloudflared/config.yml run
 
 Desde el móvil (datos, no WiFi de casa) abre:
 
-`https://app.tu-dominio.com/api/health`
+`https://fulfillpro.app/api/health`
 
 Si responde JSON `ok`, el túnel funciona. `Ctrl+C` y pasa a servicio systemd.
 
@@ -658,18 +750,20 @@ journalctl -u cloudflared -f
 
 ### 5.7 CORS y cookie / HTTPS
 
-Con el dominio definitivo, en `.env` / compose:
+En el `.env` del repo ya va:
 
 ```env
 APP_ENV=production
-CORS_ORIGINS=https://app.tu-dominio.com
+CORS_ORIGINS=https://fulfillpro.app,https://www.fulfillpro.app
 ```
 
-Reinicia API:
+Tras `git pull`, reinicia el stack (o el servicio systemd):
 
 ```bash
 cd /opt/fulfillpro
 docker compose up -d api
+# o:
+sudo systemctl restart fulfillpro
 ```
 
 En Cloudflare (recomendado):
@@ -703,8 +797,8 @@ cd /opt/fulfillpro && docker compose pull && docker compose up -d --build
 
 En Zero Trust → Access → Applications:
 
-- Application: `https://app.tu-dominio.com/ops*`
-- Policy: solo emails de owners (`@tu-empresa.com`)
+- Application: `https://fulfillpro.app/ops*`
+- Policy: solo emails de owners (`@tu-empresa.com` o el correo de los owners)
 
 Así el panel de plataforma no es alcanzable por cualquiera que adivine `/ops`.
 
@@ -798,7 +892,8 @@ journalctl -u cloudflared -n 50 --no-pager
 | API no arranca en production | Logs: JWT_SECRET / ADMIN_PASSWORD / CORS. Deben ser fuertes y CORS sin `*`. |
 | `connection refused` a db | `docker compose ps` — db healthy; `DATABASE_URL` host = `db`. |
 | 502 en el dominio | `cloudflared` caído; API no escucha en `127.0.0.1:8000`; hostname mal en `config.yml`. |
-| CORS error en navegador | `CORS_ORIGINS` debe ser exactamente `https://app.tu-dominio.com` (sin slash final raro). |
+| CORS error en navegador | `CORS_ORIGINS` debe incluir `https://fulfillpro.app` (sin slash final). Reinicia api tras cambiar `.env`. |
+| Tras reboot no hay app | `systemctl enable docker fulfillpro cloudflared` y `systemctl status fulfillpro`. |
 | Excel no procesa | Worker: `docker compose logs worker`. Cola Redis: `/api/health` → `queue`. |
 | OOM / VM se congela | Baja `WORKER_CONCURRENCY` a 2; no escales workers sin RAM. |
 | Subidas grandes fallan | Cloudflare Free tiene límites de tamaño de request; `MAX_UPLOAD_MB` ≤ 25 recomendado. |
@@ -820,14 +915,15 @@ sudo systemctl is-active cloudflared docker
 ```text
 1. Proxmox → VM Debian (12 preferible / 10 ok)  6 vCPU · 12 GB RAM · 100 GB
 2. apt update/upgrade · ufw (solo SSH LAN) · install Docker
-3. /opt/fulfillpro → código · .env production · secretos fuertes
+3. /opt/fulfillpro → git clone/pull · .env (CORS=https://fulfillpro.app)
 4. docker compose up -d --build
 5. curl http://127.0.0.1:8000/api/health
-6. cloudflared tunnel login · create · route dns · config.yml
-7. systemd enable cloudflared
-8. CORS_ORIGINS=https://app.tu-dominio.com · restart api
-9. Login /ops · cambiar hábitos · Backup ZIP
+6. sudo bash deploy/install-autostart.sh   # Docker + stack al prender la VM
+7. cloudflared tunnel login · create · route dns fulfillpro.app · config.yml
+8. systemd enable cloudflared
+9. Login https://fulfillpro.app/ops · Backup ZIP
 10. (Opcional) Cloudflare Access en /ops*
+11. sudo reboot  → verificar que todo vuelve solo
 ```
 
 ---
@@ -837,7 +933,7 @@ sudo systemctl is-active cloudflared docker
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │ Internet                                                    │
-│   https://app.tu-dominio.com                                │
+│   https://fulfillpro.app                                    │
 └───────────────────────────┬─────────────────────────────────┘
                             │ TLS termina en Cloudflare
                             ▼
@@ -851,9 +947,10 @@ sudo systemctl is-active cloudflared docker
 │ Proxmox host                                                │
 │  ┌───────────────────────────────────────────────────────┐  │
 │  │ VM Debian · fulfillpro                                │  │
+│  │  boot: docker.service → fulfillpro.service            │  │
+│  │        → cloudflared.service                          │  │
 │  │  cloudflared ──► 127.0.0.1:8000                       │  │
-│  │  Docker:                                              │  │
-│  │    api (FastAPI) · worker (Excel) · db · redis        │  │
+│  │  Docker: api · worker · db · redis                    │  │
 │  │  disco: /opt/fulfillpro/storage + volumen pgdata      │  │
 │  └───────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
