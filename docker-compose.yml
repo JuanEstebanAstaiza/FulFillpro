@@ -6,12 +6,13 @@
 #   redis   → cola de jobs (noeviction)
 #   db      → PostgreSQL
 #
+# Variables sensibles y de entorno salen de .env (env_file + ${...}).
+#
 # RAM ~12 GB:
 #   api 2G · worker 5–6G · db 3G · redis 512M
 #
-# Más paralelismo Excel (sin colapsar API):
+# Más paralelismo Excel:
 #   docker compose up -d --build --scale worker=2
-#   (con scale, bajar WORKER_CONCURRENCY a 2–3 por réplica)
 
 services:
   db:
@@ -44,10 +45,10 @@ services:
       retries: 10
     mem_limit: 3g
     cpus: 2.0
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
-    # Cola de jobs: sin eviction (nunca borrar jobs por presión de memoria)
     command:
       - redis-server
       - --maxmemory
@@ -67,35 +68,42 @@ services:
       retries: 10
     mem_limit: 512m
     cpus: 0.5
+    restart: unless-stopped
 
   api:
     build:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      # Solo localhost en el host (Cloudflared en la misma VM)
+      - "127.0.0.1:8000:8000"
     env_file:
       - .env
     environment:
+      # Red Docker interna (siempre)
       DATABASE_URL: postgresql+psycopg://fulfillpro:fulfillpro@db:5432/fulfillpro
       REDIS_URL: redis://redis:6379/0
       STORAGE_ROOT: /app/storage
-      STORAGE_MAX_GB: "100"
-      # API ligera: solo HTTP + encolar (no procesa Excel)
-      UVICORN_WORKERS: "4"
-      DB_POOL_SIZE: "12"
-      DB_MAX_OVERFLOW: "8"
-      REDIS_MAX_CONNECTIONS: "80"
-      PROCESS_MAX_QUEUE: "500"
-      MAX_UPLOAD_MB: "25"
-      RATE_LIMIT_LOGIN: "30"
-      RATE_LIMIT_PROCESS: "150"
-      RATE_LIMIT_PROCESS_IP: "500"
-      MAX_ROWS: "60000"
-      APP_ENV: development
-      SEED_DEMO_USERS: "true"
-      ALLOW_PUBLIC_REGISTER: "true"
-      CORS_ORIGINS: "http://localhost:8000,http://127.0.0.1:8000"
+      STORAGE_MAX_GB: ${STORAGE_MAX_GB:-100}
+      # Tomados del .env (sin pisar production con development)
+      APP_ENV: ${APP_ENV:-production}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://localhost}
+      SEED_DEMO_USERS: ${SEED_DEMO_USERS:-false}
+      ALLOW_PUBLIC_REGISTER: ${ALLOW_PUBLIC_REGISTER:-false}
+      JWT_SECRET: ${JWT_SECRET}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@fulfillpro.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      ADMIN_NAME: ${ADMIN_NAME:-Administrador}
+      UVICORN_WORKERS: ${UVICORN_WORKERS:-4}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-12}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-8}
+      REDIS_MAX_CONNECTIONS: ${REDIS_MAX_CONNECTIONS:-80}
+      PROCESS_MAX_QUEUE: ${PROCESS_MAX_QUEUE:-500}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
+      MAX_ROWS: ${MAX_ROWS:-60000}
+      RATE_LIMIT_LOGIN: ${RATE_LIMIT_LOGIN:-10}
+      RATE_LIMIT_PROCESS: ${RATE_LIMIT_PROCESS:-150}
+      RATE_LIMIT_PROCESS_IP: ${RATE_LIMIT_PROCESS_IP:-500}
     volumes:
       - ./storage:/app/storage
       - ./frontend:/app/frontend:ro
@@ -114,7 +122,6 @@ services:
       retries: 5
       start_period: 40s
 
-  # Workers de Excel — escalar: docker compose up -d --scale worker=2
   worker:
     build:
       context: .
@@ -126,16 +133,16 @@ services:
       DATABASE_URL: postgresql+psycopg://fulfillpro:fulfillpro@db:5432/fulfillpro
       REDIS_URL: redis://redis:6379/0
       STORAGE_ROOT: /app/storage
-      STORAGE_MAX_GB: "100"
-      # 3–4 Excel en paralelo por worker; RAM ≈ 1–1.5 GB por job típico
-      WORKER_CONCURRENCY: "3"
-      DB_POOL_SIZE: "6"
-      DB_MAX_OVERFLOW: "4"
-      REDIS_MAX_CONNECTIONS: "40"
-      MAX_ROWS: "60000"
-      MAX_UPLOAD_MB: "25"
-      APP_ENV: development
+      STORAGE_MAX_GB: ${STORAGE_MAX_GB:-100}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-3}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-6}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-4}
+      REDIS_MAX_CONNECTIONS: ${REDIS_MAX_CONNECTIONS:-40}
+      MAX_ROWS: ${MAX_ROWS:-60000}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
+      APP_ENV: ${APP_ENV:-production}
       SEED_DEMO_USERS: "false"
+      JWT_SECRET: ${JWT_SECRET}
       MPLCONFIGDIR: /tmp/matplotlib
       PYTHONPATH: /app
     volumes:

@@ -277,11 +277,21 @@ samples/
 
 ### 4.2 Archivo `.env` de producción
 
+Si el repositorio trae un `.env` temporal (solo para el primer despliegue), **no hace falta crearlo**:
+
 ```bash
 cd /opt/fulfillpro
+ls -la .env    # debe existir tras git pull
+```
+
+Si no existe:
+
+```bash
 cp .env.example .env
 nano .env   # o vim
 ```
+
+> **Seguridad:** el `.env` no debe quedarse en Git. Tras el primer arranque, elimínalo del repo en un commit posterior y rota `JWT_SECRET` / `ADMIN_PASSWORD`.
 
 Genera secretos fuertes:
 
