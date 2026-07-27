@@ -105,10 +105,14 @@ def seed_database() -> None:
         except Exception:
             pass
 
-        admin = db.query(User).filter(User.email == settings.admin_email.lower()).first()
+        # Admin de plataforma: .env es la fuente de verdad (email + password).
+        # Si el usuario ya existía de un deploy anterior, se actualiza el hash
+        # para que ADMIN_PASSWORD del .env siempre funcione tras reiniciar.
+        admin_email = (settings.admin_email or "").strip().lower()
+        admin = db.query(User).filter(User.email == admin_email).first() if admin_email else None
         if not admin:
             admin = User(
-                email=settings.admin_email.lower(),
+                email=admin_email,
                 password_hash=hash_password(settings.admin_password),
                 full_name=settings.admin_name,
                 role="admin",
@@ -123,9 +127,14 @@ def seed_database() -> None:
         else:
             admin.role = "admin"
             admin.must_accept_terms = False
+            admin.is_active = True
+            admin.full_name = settings.admin_name or admin.full_name
+            # Sincronizar contraseña desde .env (bootstrap de plataforma)
+            if settings.admin_password:
+                admin.password_hash = hash_password(settings.admin_password)
             db.commit()
 
-        admin = db.query(User).filter(User.email == settings.admin_email.lower()).first()
+        admin = db.query(User).filter(User.email == admin_email).first()
 
         # Empresa demo: solo en development y si seed_demo_users=true (OWASP A05)
         demo_admin = None

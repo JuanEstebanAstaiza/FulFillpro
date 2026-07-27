@@ -771,6 +771,66 @@ tbody tr:hover { background: #f8fafc; }
   border-radius: 4px 4px 0 0;
 }
 
+/* ══════════ Admin modals (editar licencia, etc.) ══════════ */
+/* El panel legal usaba overflow:hidden sin body scrollable → botones inaccesibles */
+.admin-modal-overlay {
+  align-items: start;
+  place-items: start center;
+  padding: 1rem;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.admin-modal-panel {
+  width: min(640px, 100%);
+  max-height: min(94vh, 920px);
+  margin: 0.5rem auto 1.5rem;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.admin-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-shrink: 0;
+  padding: 1rem 1.25rem;
+}
+.admin-modal-close {
+  color: #ecfdf5 !important;
+  border-color: rgba(255, 255, 255, 0.35) !important;
+  flex-shrink: 0;
+}
+.admin-modal-form {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+.admin-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding: 1rem 1.25rem 0.75rem;
+  overscroll-behavior: contain;
+}
+.admin-modal-footer {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  padding: 0.9rem 1.25rem 1.1rem;
+  border-top: 1px solid var(--line);
+  background: #f8fafc;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+}
+
 /* Admin / ops panel */
 .admin-wrap .content { width: min(1140px, calc(100% - 2rem)); margin: 1.25rem auto 2.5rem; }
 .tabs { display: flex; gap: 0.4rem; margin-bottom: 1.1rem; flex-wrap: wrap; }
