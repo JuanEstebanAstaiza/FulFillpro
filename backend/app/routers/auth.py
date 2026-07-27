@@ -43,23 +43,36 @@ def login_platform(body: LoginRequest, request: Request, db: Session = Depends(g
 
 @router.post("/register", response_model=TokenResponse)
 def register(body: RegisterRequest, request: Request, db: Session = Depends(get_db)):
-    """Registro del admin de empresa con código de licencia."""
+    """
+    Registro del admin de empresa con código de licencia.
+
+    Flujo de negocio (siempre permitido):
+      1) Platform admin crea la licencia en /ops
+      2) Cliente se registra en la app con ese código
+
+    `ALLOW_PUBLIC_REGISTER=false` solo bloquea altas sin código de licencia
+    (spam / registro abierto), no el onboarding con licencia válida.
+    """
     from fastapi import HTTPException
 
     settings = get_settings()
-    # OWASP A04/A07: en production el alta pública se desactiva por defecto
-    if settings.is_production and not settings.allow_public_register:
-        raise HTTPException(
-            403,
-            "El registro público está deshabilitado. Contacta al administrador de la plataforma "
-            "para que cree tu cuenta de empresa.",
-        )
     rate_limit_from_request(request, "register", settings.rate_limit_login, 60)
     ip = request.client.host if request.client else ""
-    # Longitud mínima de código de licencia en production
+
     code = (body.license_code or "").strip()
-    if settings.is_production and len(code) < 10:
+    if not code:
+        if settings.is_production and not settings.allow_public_register:
+            raise HTTPException(
+                403,
+                "Debes ingresar el código de licencia que te entregó FulfillPro. "
+                "Sin código no se puede crear la cuenta de empresa.",
+            )
+        raise HTTPException(400, "El código de licencia es obligatorio.")
+
+    # Códigos generados tipo FP-XXXX-XXXX (≥ 10). Los custom cortos también se validan en BD.
+    if settings.is_production and len(code) < 6:
         raise HTTPException(400, "Código de licencia inválido.")
+
     user = auth_service.register_with_license(db, body.model_dump(), ip=ip)
     return auth_service.issue_tokens(db, user)
 

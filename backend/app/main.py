@@ -214,6 +214,18 @@ FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
 if not FRONTEND_DIR.exists():
     FRONTEND_DIR = Path("frontend")
 
+_NO_CACHE_HEADERS = {
+    "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+    "Pragma": "no-cache",
+    "Expires": "0",
+    "CDN-Cache-Control": "no-store",
+}
+
+
+def _html_response(path: Path) -> FileResponse:
+    return FileResponse(path, media_type="text/html; charset=utf-8", headers=dict(_NO_CACHE_HEADERS))
+
+
 if FRONTEND_DIR.exists():
     app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIR / "assets")), name="assets")
     app.mount("/css", StaticFiles(directory=str(FRONTEND_DIR / "css")), name="css")
@@ -221,16 +233,16 @@ if FRONTEND_DIR.exists():
 
     @app.get("/")
     def index():
-        return FileResponse(FRONTEND_DIR / "index.html")
+        return _html_response(FRONTEND_DIR / "index.html")
 
     @app.get("/ops")
     def ops_login():
         """Ruta oculta: acceso administrador de plataforma FulfillPro."""
-        return FileResponse(FRONTEND_DIR / "ops.html")
+        return _html_response(FRONTEND_DIR / "ops.html")
 
     @app.get("/ops/panel")
     def ops_panel():
-        return FileResponse(FRONTEND_DIR / "admin.html")
+        return _html_response(FRONTEND_DIR / "admin.html")
 
     @app.get("/admin")
     def admin_redirect():

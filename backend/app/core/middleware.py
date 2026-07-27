@@ -36,6 +36,20 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         )
         response.headers.setdefault("Content-Security-Policy", csp)
 
+        # Evitar que Cloudflare / navegador sirvan HTML/JS/CSS viejos tras deploy
+        path = request.url.path or ""
+        if (
+            path in {"/", "/ops", "/ops/panel"}
+            or path.endswith(".html")
+            or path.startswith("/js/")
+            or path.startswith("/css/")
+        ):
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+            # Cloudflare: no cachear en edge
+            response.headers["CDN-Cache-Control"] = "no-store"
+
         if settings.is_production:
             response.headers.setdefault(
                 "Strict-Transport-Security",

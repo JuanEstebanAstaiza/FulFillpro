@@ -20,7 +20,8 @@ class Settings(BaseSettings):
     admin_password: str = "AdminFulfillPro2026!"
     admin_name: str = "Administrador"
 
-    # En production el registro público por código de licencia queda deshabilitado por defecto
+    # Si false: no se permite registro sin código de licencia.
+    # El alta CON código de licencia válido (onboarding de clientes) siempre está permitido.
     allow_public_register: bool = True
     seed_demo_users: bool = True
 
