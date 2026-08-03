@@ -197,6 +197,11 @@ def register_with_license(db: Session, data: dict, ip: str = "") -> User:
     except HTTPException as e:
         raise HTTPException(400, f"Licencia no usable: {e.detail}") from e
 
+    # Tope de cuentas por código de licencia (antes de crear el email)
+    from backend.app.services.license_service import assert_license_user_seat
+
+    assert_license_user_seat(db, lic)
+
     client_code = ""
     company_name = lic.company_name or lic.label or code
     if lic.owner_user_id:

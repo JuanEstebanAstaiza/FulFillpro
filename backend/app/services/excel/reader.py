@@ -30,6 +30,23 @@ COL_ALIASES = {
         "SHIP DATE",
         "FECHA GUIA GEN",
     ],
+    "ciudad": [
+        "CIUDAD",
+        "CIUDAD DESTINO",
+        "MUNICIPIO",
+        "CITY",
+        "DESTINO",
+        "CIUDAD DE DESTINO",
+    ],
+    "transportadora": [
+        "TRANSPORTADORA",
+        "TRANSPORTADOR",
+        "CARRIER",
+        "COURIER",
+        "EMPRESA TRANSPORTE",
+        "LOGISTICA",
+        "MENSAJERIA",
+    ],
 }
 
 
@@ -103,6 +120,8 @@ def read_excel_rows(content: bytes) -> list[dict[str, Any]]:
                 "cantidad": cant,
                 "valor": val,
                 "fechaGuia": get("fechaGuia"),
+                "ciudad": get("ciudad"),
+                "transportadora": get("transportadora"),
             }
         )
     wb.close()

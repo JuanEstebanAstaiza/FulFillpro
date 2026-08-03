@@ -49,7 +49,11 @@ function showView(name) {
   if (name === "dashboard") loadDashboard();
   if (name === "history") loadHistory();
   if (name === "team") loadTeam();
-  if (name === "analytics") loadAnalytics();
+  if (name === "analytics") {
+    loadAnalytics();
+    loadDispatchStats();
+    loadDispatchDays();
+  }
 }
 
 function simpleMarkdown(md) {
@@ -179,6 +183,10 @@ async function init() {
 
   const btnRefresh = $("#btn-analytics-refresh");
   if (btnRefresh) btnRefresh.addEventListener("click", () => loadAnalytics());
+  const btnStats = $("#btn-stats-refresh");
+  if (btnStats) btnStats.addEventListener("click", () => loadDispatchStats());
+  const btnDisp = $("#btn-dispatch-refresh");
+  if (btnDisp) btnDisp.addEventListener("click", () => loadDispatchDays());
   const btnCons = $("#btn-consolidate");
   if (btnCons) btnCons.addEventListener("click", onConsolidate);
   const btnDlPdf = $("#btn-dl-pdf");
@@ -622,9 +630,14 @@ async function loadTeam() {
           <td><span class="badge ${u.is_active ? "badge-ok" : "badge-err"}">${
             u.is_active ? "activo" : "off"
           }</span></td>
-          <td><button class="btn btn-sm btn-ghost" type="button" data-action="toggle-emp" data-id="${escapeHtml(
-            u.id
-          )}">Toggle</button></td>
+          <td class="row-actions">
+            <button class="btn btn-sm btn-ghost" type="button" data-action="toggle-emp" data-id="${escapeHtml(
+              u.id
+            )}">${u.is_active ? "Bloquear" : "Reactivar"}</button>
+            <button class="btn btn-sm btn-ghost" type="button" data-action="delete-emp" data-id="${escapeHtml(
+              u.id
+            )}">Eliminar</button>
+          </td>
         </tr>`;
       })
       .join("");
@@ -1117,8 +1130,153 @@ async function onCreateEmployee(e) {
 }
 
 async function toggleEmp(id) {
-  await API.toggleEmployee(id);
-  await loadTeam();
+  try {
+    await API.toggleEmployee(id);
+    await loadTeam();
+    showAlert($("#global-alert"), "Estado del usuario actualizado.", "ok");
+  } catch (err) {
+    showAlert($("#global-alert"), err.message);
+  }
+}
+
+async function deleteEmp(id) {
+  if (!confirm("¿Eliminar esta cuenta de forma permanente? Liberará un cupo de la licencia.")) {
+    return;
+  }
+  try {
+    await API.deleteEmployee(id);
+    await loadTeam();
+    showAlert($("#global-alert"), "Usuario eliminado.", "ok");
+  } catch (err) {
+    showAlert($("#global-alert"), err.message);
+  }
+}
+
+function moneyFmt(n) {
+  return Number(n || 0).toLocaleString("es-CO", { maximumFractionDigits: 0 });
+}
+
+async function loadDispatchStats() {
+  const moneyBody = $("#stats-money-body");
+  const citiesBody = $("#stats-cities-body");
+  const carriersBody = $("#stats-carriers-body");
+  if (!moneyBody) return;
+  try {
+    const s = await API.dispatchStats(90);
+    if ($("#dispatch-stats-note")) $("#dispatch-stats-note").textContent = s.note || "";
+    const fill = (el, rows, valKey) => {
+      if (!rows || !rows.length) {
+        el.innerHTML = `<tr><td colspan="3" class="muted">Sin datos aún. Procesa Excel con valor/ciudad/transportadora.</td></tr>`;
+        return;
+      }
+      el.innerHTML = rows
+        .map(
+          (r, i) =>
+            `<tr><td>${i + 1}</td><td>${escapeHtml(r.name)}</td><td><strong>${
+              valKey === "value" ? "$" + moneyFmt(r.value) : r.orders
+            }</strong></td></tr>`
+        )
+        .join("");
+    };
+    fill(moneyBody, s.top_products_money, "value");
+    fill(citiesBody, s.cities, "orders");
+    fill(carriersBody, s.carriers, "orders");
+  } catch (err) {
+    moneyBody.innerHTML = `<tr><td colspan="3">${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+async function loadDispatchDays() {
+  const body = $("#dispatch-days-body");
+  if (!body) return;
+  try {
+    const data = await API.dispatchDays(false);
+    const items = data.items || [];
+    if (!items.length) {
+      body.innerHTML = `<tr><td colspan="6" class="muted">Aún no hay días de despacho. Procesa un Excel con guías.</td></tr>`;
+      return;
+    }
+    body.innerHTML = items
+      .map((d) => {
+        const st = d.released
+          ? `<span class="badge badge-ok">Liberado</span>`
+          : `<span class="badge badge-warn">${d.days_until_unlock}d</span>`;
+        const actions = d.released
+          ? `<button class="btn btn-sm btn-primary" type="button" data-action="dl-dispatch" data-id="${escapeHtml(
+              d.id
+            )}">Descargar</button>
+             <button class="btn btn-sm btn-ghost" type="button" data-action="view-dispatch" data-id="${escapeHtml(
+               d.id
+             )}">Ver</button>`
+          : `<button class="btn btn-sm btn-ghost" type="button" data-action="view-dispatch" data-id="${escapeHtml(
+              d.id
+            )}">Detalle</button>`;
+        return `<tr>
+          <td>${escapeHtml(d.dispatch_date)}</td>
+          <td>${d.guias_count || 0}</td>
+          <td>$${moneyFmt(d.total_value)}</td>
+          <td>${st}</td>
+          <td class="muted">${escapeHtml(d.unlock_on || "—")}</td>
+          <td class="row-actions">${actions}</td>
+        </tr>`;
+      })
+      .join("");
+  } catch (err) {
+    body.innerHTML = `<tr><td colspan="6">${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+async function viewDispatchDay(id) {
+  const box = $("#dispatch-day-detail");
+  if (!box) return;
+  try {
+    const d = await API.dispatchDay(id);
+    box.classList.remove("hidden");
+    const lines = (d.lines || [])
+      .slice(0, 40)
+      .map(
+        (ln) =>
+          `<tr>
+            <td class="mono">${escapeHtml(ln.guia)}</td>
+            <td>${escapeHtml(ln.city || "—")}</td>
+            <td>${escapeHtml(ln.carrier || "—")}</td>
+            <td>$${moneyFmt(ln.value)}</td>
+            <td><span class="badge badge-muted">${escapeHtml(ln.status)}</span></td>
+            <td>${ln.days_since_dispatch}d</td>
+          </tr>`
+      )
+      .join("");
+    box.innerHTML = `
+      <h3>Detalle ${escapeHtml(d.dispatch_date)}</h3>
+      <p class="hint">${escapeHtml(d.message || "")}</p>
+      <table>
+        <thead><tr><th>Guía</th><th>Ciudad</th><th>Transportadora</th><th>Valor</th><th>Estado</th><th>Días</th></tr></thead>
+        <tbody>${lines || `<tr><td colspan="6" class="muted">Sin guías</td></tr>`}</tbody>
+      </table>
+      ${
+        d.released
+          ? `<button type="button" class="btn btn-primary btn-sm" data-action="dl-dispatch" data-id="${escapeHtml(
+              d.id
+            )}" style="margin-top:0.75rem">Descargar Excel</button>`
+          : ""
+      }`;
+  } catch (err) {
+    showAlert($("#global-alert"), err.message);
+  }
+}
+
+async function downloadDispatchDay(id) {
+  try {
+    const res = await API.dispatchDownload(id);
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `consolidado_guias_${id.slice(0, 8)}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch (err) {
+    showAlert($("#global-alert"), err.message);
+  }
 }
 
 async function dlAuth(orderId, kind) {
@@ -1149,6 +1307,15 @@ document.addEventListener("click", (e) => {
   } else if (action === "toggle-emp") {
     e.preventDefault();
     toggleEmp(id);
+  } else if (action === "delete-emp") {
+    e.preventDefault();
+    deleteEmp(id);
+  } else if (action === "dl-dispatch") {
+    e.preventDefault();
+    downloadDispatchDay(id);
+  } else if (action === "view-dispatch") {
+    e.preventDefault();
+    viewDispatchDay(id);
   } else if (action === "dl-consolidado") {
     e.preventDefault();
     downloadConsolidation(id, btn.dataset.format || "pdf");

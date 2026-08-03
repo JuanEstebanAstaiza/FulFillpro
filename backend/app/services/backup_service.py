@@ -36,6 +36,7 @@ from backend.app.models.analytics import (
 from backend.app.models.audit import AccessLog, SecurityEvent
 from backend.app.models.device import Device
 from backend.app.models.legal import LegalDocument, UserConsent
+from backend.app.models.dispatch import DispatchDay, DispatchGuia
 from backend.app.models.license import License, LicenseTemplate
 from backend.app.models.order import Order, OrderFile
 from backend.app.models.user import User
@@ -57,6 +58,8 @@ TABLE_MODELS: list[tuple[str, Any]] = [
     ("analytics_weeks", AnalyticsWeek),
     ("analytics_sale_events", AnalyticsSaleEvent),
     ("analytics_consolidations", AnalyticsConsolidation),
+    ("dispatch_days", DispatchDay),
+    ("dispatch_guias", DispatchGuia),
     ("access_logs", AccessLog),
     ("security_events", SecurityEvent),
 ]
@@ -65,6 +68,8 @@ TABLE_MODELS: list[tuple[str, Any]] = [
 CLEAR_ORDER = [
     "security_events",
     "access_logs",
+    "dispatch_guias",
+    "dispatch_days",
     "analytics_consolidations",
     "analytics_sale_events",
     "analytics_weeks",

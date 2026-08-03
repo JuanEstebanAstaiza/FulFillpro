@@ -17,7 +17,18 @@ from backend.app.database import Base, SessionLocal, engine
 from backend.app.models import *  # noqa: F401,F403
 from backend.app.models.license import License
 from backend.app.models.user import User
-from backend.app.routers import admin, analytics, auth, company, health, legal, licenses, orders, process
+from backend.app.routers import (
+    admin,
+    analytics,
+    auth,
+    company,
+    dispatch,
+    health,
+    legal,
+    licenses,
+    orders,
+    process,
+)
 from backend.app.services import legal_service, license_service, storage_service
 
 settings = get_settings()
@@ -59,6 +70,7 @@ app.include_router(admin.router)
 app.include_router(legal.router)
 app.include_router(company.router)
 app.include_router(analytics.router)
+app.include_router(dispatch.router)
 
 
 def _safe_alter(sql: str) -> None:
@@ -84,6 +96,10 @@ def ensure_schema() -> None:
     )
     _safe_alter(
         "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS analytics_storage_mb INTEGER DEFAULT 200"
+    )
+    _safe_alter("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS max_users INTEGER DEFAULT 0")
+    _safe_alter(
+        "ALTER TABLE license_templates ADD COLUMN IF NOT EXISTS max_users INTEGER DEFAULT 0"
     )
     # Quitar FK de source_order_id si existía (analítica no depende del ciclo de vida de orders)
     _safe_alter(

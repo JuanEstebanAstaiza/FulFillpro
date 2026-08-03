@@ -14,6 +14,7 @@ class LicenseCreate(BaseModel):
     company_name: str = ""
     owner_user_id: Optional[UUID] = None
     max_devices: int = 3
+    max_users: int = 0  # 0 = ilimitado de cuentas/emails
     limit_uses: int = 0  # 0 = ilimitado
     daily_limit: int = 0  # 0 = sin límite diario
     duration_days: Optional[int] = None  # genera expiry desde hoy
@@ -32,6 +33,7 @@ class LicenseUpdate(BaseModel):
     company_name: Optional[str] = None
     owner_user_id: Optional[UUID] = None
     max_devices: Optional[int] = None
+    max_users: Optional[int] = None
     limit_uses: Optional[int] = None
     daily_limit: Optional[int] = None
     expiry: Optional[date] = None
@@ -63,6 +65,7 @@ class LicenseChangePlan(BaseModel):
     label: Optional[str] = None
     company_name: Optional[str] = None
     max_devices: Optional[int] = None
+    max_users: Optional[int] = None
     limit_uses: Optional[int] = None
     daily_limit: Optional[int] = None
     # Tiempo de vigencia
@@ -101,6 +104,8 @@ class LicenseOut(BaseModel):
     company_name: str
     owner_user_id: Optional[UUID] = None
     max_devices: int
+    max_users: int = 0
+    users_count: int = 0
     limit_uses: int
     uses: int
     daily_limit: int
@@ -143,6 +148,7 @@ class LicenseTemplateCreate(BaseModel):
     license_type: str = "standard"
     label_default: str = ""
     max_devices: int = 5
+    max_users: int = 0
     limit_uses: int = 0
     daily_limit: int = 0
     duration_days: int = 30
@@ -164,6 +170,7 @@ class LicenseTemplateUpdate(BaseModel):
     license_type: Optional[str] = None
     label_default: Optional[str] = None
     max_devices: Optional[int] = None
+    max_users: Optional[int] = None
     limit_uses: Optional[int] = None
     daily_limit: Optional[int] = None
     duration_days: Optional[int] = None

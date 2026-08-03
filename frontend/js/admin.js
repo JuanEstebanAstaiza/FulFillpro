@@ -432,7 +432,14 @@ async function loadUsers() {
       <td class="mono">${escape(u.client_code)}</td>
       <td>${escape(u.company_name || "—")}</td>
       <td><span class="badge ${u.is_active ? "badge-ok" : "badge-err"}">${u.is_active ? "activo" : "off"}</span></td>
-      <td><button class="btn btn-sm btn-ghost" type="button" data-action="toggle-user" data-id="${escape(u.id)}">Toggle</button></td>
+      <td class="row-actions">
+        <button class="btn btn-sm btn-ghost" type="button" data-action="toggle-user" data-id="${escape(
+          u.id
+        )}">${u.is_active ? "Bloquear" : "Reactivar"}</button>
+        <button class="btn btn-sm btn-ghost" type="button" data-action="delete-user" data-id="${escape(
+          u.id
+        )}">Eliminar</button>
+      </td>
     </tr>`
     )
     .join("");
@@ -551,7 +558,9 @@ function renderTemplatesTable() {
         <td class="mono">${escape(t.slug)}${t.is_system ? ' <span class="badge badge-muted">sys</span>' : ""}</td>
         <td><strong>${escape(t.name)}</strong><div class="muted">${escape(t.description || "")}</div></td>
         <td><span class="badge badge-muted">${escape(t.license_type)}</span></td>
-        <td>${limit} global · ${daily}/día · ${t.max_devices} eq.</td>
+        <td>${limit} global · ${daily}/día · ${t.max_devices} eq. · ${
+        t.max_users > 0 ? t.max_users + " users" : "∞ users"
+      }</td>
         <td>${t.duration_days}</td>
         <td><span class="badge ${t.is_active ? "badge-ok" : "badge-err"}">${
           t.is_active ? "activa" : "off"
@@ -600,6 +609,7 @@ function editTemplateIntoForm(id) {
   $("#tpl-daily").value = t.daily_limit ?? 0;
   $("#tpl-days").value = t.duration_days ?? 30;
   $("#tpl-devices").value = t.max_devices ?? 5;
+  if ($("#tpl-max-users")) $("#tpl-max-users").value = t.max_users ?? 0;
   $("#tpl-sort").value = t.sort_order ?? 100;
   $("#tpl-desc").value = t.description || "";
   $("#tpl-count-global").checked = !!t.count_toward_global;
@@ -622,6 +632,7 @@ async function saveTemplateForm(e) {
     label_default: $("#tpl-label").value.trim() || $("#tpl-name").value.trim(),
     description: $("#tpl-desc").value.trim(),
     max_devices: numOrNull($("#tpl-devices").value) ?? 5,
+    max_users: numOrNull($("#tpl-max-users")?.value) ?? 0,
     limit_uses: numOrNull($("#tpl-limit").value) ?? 0,
     daily_limit: numOrNull($("#tpl-daily").value) ?? 0,
     duration_days: numOrNull($("#tpl-days").value) ?? 30,
@@ -688,6 +699,7 @@ async function createLicense(e) {
     company_name: $("#lic-company").value.trim(),
     template: $("#template").value || null,
     max_devices: numOrNull($("#lic-devices").value),
+    max_users: numOrNull($("#lic-max-users")?.value),
     limit_uses: numOrNull($("#lic-limit").value),
     daily_limit: numOrNull($("#lic-daily").value),
     duration_days: numOrNull($("#lic-days").value),
@@ -734,6 +746,13 @@ async function renewLic(id, days = 30) {
 async function toggleUser(id) {
   await API.request(`/api/admin/users/${id}/toggle`, { method: "POST" });
   await loadUsers();
+  showAdminAlert("Usuario actualizado (bloquear / reactivar).", "ok");
+}
+async function deleteUser(id) {
+  if (!confirm("¿Eliminar esta cuenta de forma permanente?")) return;
+  await API.request(`/api/admin/users/${id}`, { method: "DELETE" });
+  await loadUsers();
+  showAdminAlert("Usuario eliminado.", "ok");
 }
 async function resolveInc(id) {
   await API.request(`/api/admin/monitoring/incidents/${id}/resolve`, { method: "POST" });
@@ -807,6 +826,9 @@ document.addEventListener("click", (e) => {
   } else if (action === "toggle-user") {
     e.preventDefault();
     toggleUser(id);
+  } else if (action === "delete-user") {
+    e.preventDefault();
+    deleteUser(id);
   } else if (action === "resolve-inc") {
     e.preventDefault();
     resolveInc(id);

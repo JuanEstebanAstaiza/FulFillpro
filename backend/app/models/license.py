@@ -40,6 +40,8 @@ class License(Base):
     company_name = Column(String(255), default="")
 
     max_devices = Column(Integer, default=3)
+    # Máximo de cuentas (emails) por licencia/empresa. 0 = ilimitado
+    max_users = Column(Integer, default=0)
     limit_uses = Column(Integer, default=0)  # 0 = ilimitado (salvo features)
     uses = Column(Integer, default=0)  # contador global de órdenes procesadas
     daily_limit = Column(Integer, default=0)  # 0 = sin límite diario
@@ -91,6 +93,7 @@ class LicenseTemplate(Base):
     label_default = Column(String(255), default="")
 
     max_devices = Column(Integer, default=5)
+    max_users = Column(Integer, default=0)  # 0 = ilimitado
     limit_uses = Column(Integer, default=0)
     daily_limit = Column(Integer, default=0)
     duration_days = Column(Integer, default=30)

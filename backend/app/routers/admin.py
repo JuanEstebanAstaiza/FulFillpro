@@ -366,6 +366,7 @@ def toggle_user(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
+    """Bloquear o reactivar cualquier cuenta de la plataforma."""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(404, "Usuario no encontrado.")
@@ -374,6 +375,31 @@ def toggle_user(
     user.is_active = not user.is_active
     db.commit()
     return UserOut.model_validate(user)
+
+
+@router.delete("/users/{user_id}")
+def delete_user(
+    user_id: UUID,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Elimina permanentemente una cuenta (libera cupo de licencia de la empresa)."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "Usuario no encontrado.")
+    if user.id == admin.id:
+        raise HTTPException(400, "No puedes eliminarte a ti mismo.")
+    email = user.email
+    role = user.role
+    db.delete(user)
+    db.commit()
+    log_access(
+        db,
+        event_type="admin",
+        detail=f"Usuario eliminado {email} ({role})",
+        user_id=admin.id,
+    )
+    return {"ok": True, "email": email}
 
 
 # ── Monitoreo / incidentes ─────────────────────────────────

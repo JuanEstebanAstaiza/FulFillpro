@@ -30,10 +30,17 @@ def product_with_variation(row: dict[str, Any]) -> str:
 def process_rows(rows: list[dict[str, Any]], today: date) -> tuple:
     """Fases 4–13 de la especificación. Retorna resumen, cant_max, reporte, prior, total_riesgo."""
     settings = get_settings()
-    rows = sorted(rows, key=lambda r: r["producto"])
+    # Conservar orden de aparición del Excel de entrada (no reordenar alfabético)
+    input_rows = list(rows)
+    product_order: list[str] = []
+    for r in input_rows:
+        p = str(r.get("producto") or "").strip()
+        if p and p not in product_order:
+            product_order.append(p)
+    product_rank = {p: i for i, p in enumerate(product_order)}
 
     by_guia: dict[str, list] = {}
-    for r in rows:
+    for r in input_rows:
         if r["guia"]:
             by_guia.setdefault(r["guia"], []).append(r)
 
@@ -92,7 +99,16 @@ def process_rows(rows: list[dict[str, Any]], today: date) -> tuple:
         for c, n in cnts.items():
             unified[ukey][f"Cantidad {c}"] = unified[ukey].get(f"Cantidad {c}", 0) + n
 
-    resumen_final = sorted(unified.values(), key=lambda r: r["PRODUCTO"])
+    def _resumen_sort_key(row: dict) -> tuple:
+        prod = str(row.get("PRODUCTO") or "")
+        # Combos / nombres compuestos: rank del primer producto conocido
+        rank = product_rank.get(prod, 10_000)
+        for p, i in product_rank.items():
+            if p in prod:
+                rank = min(rank, i)
+        return (rank, prod)
+
+    resumen_final = sorted(unified.values(), key=_resumen_sort_key)
     for row in resumen_final:
         total_unidades = 0
         for c in range(1, cant_max + 1):
@@ -104,13 +120,22 @@ def process_rows(rows: list[dict[str, Any]], today: date) -> tuple:
             row[f"Cantidad {c}"] = n_ordenes if n_ordenes > 0 else ""
         row["TOTAL_UNIDADES"] = total_unidades
 
-    reporte = sorted(
-        [{"ID ORDEN": r["id"], "PRODUCTO": r["producto"], "CANTIDAD": r["cantidad"]} for r in rows],
-        key=lambda r: (r["PRODUCTO"], r["CANTIDAD"]),
-    )
+    # Reporte Ordenado: mismo orden de filas del Excel de entrada (orden de generación)
+    reporte = [
+        {
+            "ID ORDEN": r["id"],
+            "PRODUCTO": r["producto"],
+            "CANTIDAD": r["cantidad"],
+            "GUIA": r.get("guia") or "",
+            "CIUDAD": r.get("ciudad") or "",
+            "TRANSPORTADORA": r.get("transportadora") or "",
+            "VALOR": r.get("valor") or 0,
+        }
+        for r in input_rows
+    ]
 
     prior = []
-    for r in rows:
+    for r in input_rows:
         fg = parse_date(r["fechaGuia"])
         if fg:
             dias = (today - fg).days

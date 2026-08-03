@@ -66,6 +66,11 @@ def create_employee(
     client_code = admin.client_code if admin.role != "admin" else (admin.client_code or "DEMO")
     company_name = admin.company_name or ""
 
+    # Tope de usuarios de la licencia de la empresa
+    lic = license_service.get_user_license(db, admin)
+    if lic:
+        license_service.assert_license_user_seat(db, lic)
+
     user = User(
         email=email,
         password_hash=hash_password(body.password),
@@ -99,6 +104,7 @@ def toggle_employee(
     db: Session = Depends(get_db),
     admin: User = Depends(require_company_admin),
 ):
+    """Activa o desactiva (bloquea). Un usuario bloqueado se puede reactivar con el mismo botón."""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(404, "Usuario no encontrado.")
@@ -106,9 +112,61 @@ def toggle_employee(
         raise HTTPException(403, "No pertenece a tu empresa.")
     if user.id == admin.id:
         raise HTTPException(400, "No puedes desactivarte a ti mismo.")
+    # Al reactivar, respetar tope de asientos
+    if not user.is_active:
+        lic = license_service.get_user_license(db, admin)
+        if lic:
+            max_users = int(getattr(lic, "max_users", 0) or 0)
+            if max_users > 0:
+                active = (
+                    db.query(User)
+                    .filter(
+                        User.client_code == admin.client_code,
+                        User.is_active.is_(True),
+                        User.role.in_(["employee", "company_admin", "client"]),
+                    )
+                    .count()
+                )
+                if active >= max_users:
+                    raise HTTPException(
+                        403,
+                        f"No puedes reactivar: el plan permite {max_users} cuenta(s) activas.",
+                    )
     user.is_active = not user.is_active
     db.commit()
     return UserOut.model_validate(user)
+
+
+@router.delete("/employees/{user_id}")
+def delete_employee(
+    user_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_company_admin),
+):
+    """Elimina permanentemente un colaborador de la empresa (libera cupo de licencia)."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "Usuario no encontrado.")
+    if admin.role != "admin" and user.client_code != admin.client_code:
+        raise HTTPException(403, "No pertenece a tu empresa.")
+    if user.id == admin.id:
+        raise HTTPException(400, "No puedes eliminarte a ti mismo.")
+    if user.role == "company_admin" and admin.role != "admin":
+        # Solo platform admin borra a otro company_admin
+        raise HTTPException(403, "No puedes eliminar al administrador de la empresa.")
+    email = user.email
+    db.delete(user)
+    db.commit()
+    ip = request.client.host if request.client else ""
+    log_access(
+        db,
+        event_type="delete_employee",
+        detail=f"Usuario eliminado {email}",
+        user_id=admin.id,
+        ip=ip,
+    )
+    return {"ok": True, "email": email}
 
 
 @router.get("/overview")

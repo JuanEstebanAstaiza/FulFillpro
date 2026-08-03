@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>FulfillPro</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="/css/app.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet" />
@@ -298,6 +299,68 @@
               </thead>
               <tbody id="analytics-rank-body"></tbody>
             </table>
+          </div>
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h2>Estadísticas de despacho</h2>
+                <p class="lead" style="margin:0">
+                  Top productos por valor ($), ciudades destino y transportadoras (últimos 90 días).
+                  Incluye columnas <strong>CIUDAD</strong> y <strong>TRANSPORTADORA</strong> en tu Excel si las tienes.
+                </p>
+              </div>
+              <button type="button" class="btn btn-ghost btn-sm" id="btn-stats-refresh">Actualizar stats</button>
+            </div>
+            <div id="dispatch-stats-note" class="hint" style="margin-bottom:0.75rem"></div>
+            <div class="grid-2">
+              <div>
+                <h3>Top productos (dinero)</h3>
+                <table>
+                  <thead><tr><th>#</th><th>Producto</th><th>Valor $</th></tr></thead>
+                  <tbody id="stats-money-body"></tbody>
+                </table>
+              </div>
+              <div>
+                <h3>Ciudades</h3>
+                <table>
+                  <thead><tr><th>#</th><th>Ciudad</th><th>Pedidos</th></tr></thead>
+                  <tbody id="stats-cities-body"></tbody>
+                </table>
+              </div>
+            </div>
+            <div style="margin-top:1rem">
+              <h3>Transportadoras</h3>
+              <table>
+                <thead><tr><th>#</th><th>Transportadora</th><th>Pedidos</th></tr></thead>
+                <tbody id="stats-carriers-body"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h2>Consolidado de guías (28 días)</h2>
+                <p class="lead" style="margin:0">
+                  Cada día de despacho se guarda automáticamente. Tras <strong>28 días</strong>
+                  se libera para vendedores: consulta el estado de cada guía y descarga el Excel.
+                </p>
+              </div>
+              <button type="button" class="btn btn-ghost btn-sm" id="btn-dispatch-refresh">Actualizar</button>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha despacho</th>
+                  <th>Guías</th>
+                  <th>Valor</th>
+                  <th>Estado</th>
+                  <th>Liberación</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="dispatch-days-body"></tbody>
+            </table>
+            <div id="dispatch-day-detail" class="hidden" style="margin-top:1rem"></div>
           </div>
           <div class="card">
             <h2>Historial de semanas</h2>

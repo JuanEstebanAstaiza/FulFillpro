@@ -137,6 +137,21 @@ const API = {
   toggleEmployee(id) {
     return this.request(`/api/company/employees/${id}/toggle`, { method: "POST" });
   },
+  deleteEmployee(id) {
+    return this.request(`/api/company/employees/${id}`, { method: "DELETE" });
+  },
+  dispatchDays(releasedOnly = false) {
+    return this.request(`/api/dispatch/days?released_only=${releasedOnly ? "true" : "false"}`);
+  },
+  dispatchDay(id) {
+    return this.request(`/api/dispatch/days/${id}`);
+  },
+  async dispatchDownload(id) {
+    return this.request(`/api/dispatch/days/${id}/download`);
+  },
+  dispatchStats(days = 90) {
+    return this.request(`/api/dispatch/stats?days=${days}`);
+  },
   analyticsCurrent() {
     return this.request("/api/analytics/current");
   },

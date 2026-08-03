@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>FulfillPro · Panel plataforma</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="/css/app.css" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Outfit:wght@600;700&display=swap" rel="stylesheet" />
 </head>
@@ -121,6 +122,11 @@
                   <label for="lic-devices">Máx. equipos (legacy)</label>
                   <input id="lic-devices" type="number" min="1" value="99" />
                 </div>
+                <div class="field">
+                  <label for="lic-max-users">Máx. cuentas / emails (0 = ∞)</label>
+                  <input id="lic-max-users" type="number" min="0" placeholder="plantilla" />
+                  <div class="hint">Tope de usuarios que pueden registrarse con este código.</div>
+                </div>
               </div>
               <div class="field">
                 <label><input id="lic-count-global" type="checkbox" checked style="width:auto;margin-right:0.4rem" /> Contar en cupo global</label>
@@ -201,6 +207,10 @@
                 <div class="field">
                   <label for="tpl-devices">Máx. equipos</label>
                   <input id="tpl-devices" type="number" min="1" value="5" />
+                </div>
+                <div class="field">
+                  <label for="tpl-max-users">Máx. cuentas / emails (0 = ∞)</label>
+                  <input id="tpl-max-users" type="number" min="0" value="10" />
                 </div>
                 <div class="field">
                   <label for="tpl-sort">Orden en listas</label>

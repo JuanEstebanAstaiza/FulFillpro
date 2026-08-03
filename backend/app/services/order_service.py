@@ -220,6 +220,35 @@ def process_order(
                 meta={"order_id": str(order.id)},
             )
 
+        # Consolidado diario de guías (liberación a vendedores a los 28 días)
+        try:
+            from backend.app.services import dispatch_service
+
+            dispatch_meta = dispatch_service.ingest_dispatch_rows(
+                db,
+                user=user,
+                lic=lic,
+                source_order_id=order.id,
+                rows=rows,
+            )
+            meta = dict(order.meta or {})
+            meta["dispatch"] = dispatch_meta
+            order.meta = meta
+            db.commit()
+            db.refresh(order)
+        except Exception as de:
+            log_security(
+                db,
+                title="Despacho diario no ingerido",
+                detail=str(de),
+                severity="warning",
+                category="operational",
+                user_id=user.id,
+                license_code=lic.code if lic else "",
+                ip=ip,
+                meta={"order_id": str(order.id)},
+            )
+
         log_access(
             db,
             event_type="process",

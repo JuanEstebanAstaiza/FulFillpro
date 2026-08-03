@@ -28,6 +28,7 @@ DEFAULT_TEMPLATE_SEED: list[dict[str, Any]] = [
         "license_type": "trial",
         "label_default": "Prueba gratuita",
         "max_devices": 3,
+        "max_users": 3,
         "limit_uses": 50,
         "daily_limit": 3,
         "duration_days": 7,
@@ -47,6 +48,7 @@ DEFAULT_TEMPLATE_SEED: list[dict[str, Any]] = [
         "license_type": "standard",
         "label_default": "Plan Standard",
         "max_devices": 5,
+        "max_users": 10,
         "limit_uses": 500,
         "daily_limit": 50,
         "duration_days": 30,
@@ -66,6 +68,7 @@ DEFAULT_TEMPLATE_SEED: list[dict[str, Any]] = [
         "license_type": "pro",
         "label_default": "Plan Pro",
         "max_devices": 15,
+        "max_users": 25,
         "limit_uses": 0,
         "daily_limit": 200,
         "duration_days": 365,
@@ -85,6 +88,7 @@ DEFAULT_TEMPLATE_SEED: list[dict[str, Any]] = [
         "license_type": "enterprise",
         "label_default": "Plan Enterprise",
         "max_devices": 999,
+        "max_users": 0,
         "limit_uses": 0,
         "daily_limit": 0,
         "duration_days": 365,
@@ -105,6 +109,7 @@ TEMPLATES: dict[str, dict[str, Any]] = {
         "type": row["license_type"],
         "label": row["label_default"],
         "max_devices": row["max_devices"],
+        "max_users": row.get("max_users", 0),
         "limit_uses": row["limit_uses"],
         "daily_limit": row["daily_limit"],
         "duration_days": row["duration_days"],
@@ -139,6 +144,7 @@ def template_to_apply_dict(tpl: LicenseTemplate) -> dict[str, Any]:
         "type": tpl.license_type or tpl.slug,
         "label": tpl.label_default or tpl.name,
         "max_devices": int(tpl.max_devices or 3),
+        "max_users": int(getattr(tpl, "max_users", 0) or 0),
         "limit_uses": int(tpl.limit_uses or 0),
         "daily_limit": int(tpl.daily_limit or 0),
         "duration_days": int(tpl.duration_days or 30),
@@ -161,6 +167,7 @@ def template_to_dict(tpl: LicenseTemplate) -> dict[str, Any]:
         "license_type": tpl.license_type,
         "label_default": tpl.label_default or "",
         "max_devices": tpl.max_devices,
+        "max_users": int(getattr(tpl, "max_users", 0) or 0),
         "limit_uses": tpl.limit_uses,
         "daily_limit": tpl.daily_limit,
         "duration_days": tpl.duration_days,
@@ -200,6 +207,7 @@ def seed_license_templates(db: Session) -> int:
                 license_type=row["license_type"],
                 label_default=row.get("label_default") or row["name"],
                 max_devices=row["max_devices"],
+                max_users=int(row.get("max_users") or 0),
                 limit_uses=row["limit_uses"],
                 daily_limit=row["daily_limit"],
                 duration_days=row["duration_days"],
@@ -265,6 +273,7 @@ def create_template(db: Session, data: dict) -> LicenseTemplate:
         license_type=(data.get("license_type") or data.get("type") or slug)[:32],
         label_default=(data.get("label_default") or data.get("label") or data.get("name") or slug).strip(),
         max_devices=int(data.get("max_devices") if data.get("max_devices") is not None else 5),
+        max_users=int(data.get("max_users") if data.get("max_users") is not None else 0),
         limit_uses=int(data.get("limit_uses") if data.get("limit_uses") is not None else 0),
         daily_limit=int(data.get("daily_limit") if data.get("daily_limit") is not None else 0),
         duration_days=int(data.get("duration_days") if data.get("duration_days") is not None else 30),
@@ -304,6 +313,7 @@ def update_template(db: Session, tpl: LicenseTemplate, data: dict) -> LicenseTem
         "label_default": "label_default",
         "label": "label_default",
         "max_devices": "max_devices",
+        "max_users": "max_users",
         "limit_uses": "limit_uses",
         "daily_limit": "daily_limit",
         "duration_days": "duration_days",
@@ -322,6 +332,7 @@ def update_template(db: Session, tpl: LicenseTemplate, data: dict) -> LicenseTem
             val = data[src]
             if dest in {
                 "max_devices",
+                "max_users",
                 "limit_uses",
                 "daily_limit",
                 "duration_days",
@@ -394,6 +405,43 @@ def active_devices_count(db: Session, license_id: UUID) -> int:
     return db.query(Device).filter(Device.license_id == license_id, Device.is_active.is_(True)).count()
 
 
+def resolve_license_client_code(db: Session, lic: License) -> str:
+    """client_code de la empresa asociada a la licencia."""
+    if lic.owner_user_id:
+        owner = db.query(User).filter(User.id == lic.owner_user_id).first()
+        if owner and owner.client_code:
+            return owner.client_code
+    return (lic.company_name or lic.code or "").upper().replace(" ", "")[:32]
+
+
+def count_license_users(db: Session, lic: License, *, only_active: bool = False) -> int:
+    """Cuentas (emails) ligadas a la empresa de la licencia."""
+    code = resolve_license_client_code(db, lic)
+    if not code:
+        return 0
+    q = db.query(func.count(User.id)).filter(
+        User.client_code == code,
+        User.role.in_(["employee", "company_admin", "client"]),
+    )
+    if only_active:
+        q = q.filter(User.is_active.is_(True))
+    return int(q.scalar() or 0)
+
+
+def assert_license_user_seat(db: Session, lic: License) -> None:
+    """Bloquea crear más correos del máximo permitido en la licencia."""
+    max_users = int(getattr(lic, "max_users", 0) or 0)
+    if max_users <= 0:
+        return  # ilimitado
+    current = count_license_users(db, lic, only_active=False)
+    if current >= max_users:
+        raise HTTPException(
+            403,
+            f"Esta licencia permite máximo {max_users} cuenta(s). "
+            f"Ya hay {current} registradas. Contacta a FulfillPro para ampliar el plan.",
+        )
+
+
 def license_to_dict(db: Session, lic: License, include_devices: bool = True) -> dict:
     devices = []
     if include_devices:
@@ -417,6 +465,8 @@ def license_to_dict(db: Session, lic: License, include_devices: bool = True) -> 
         "company_name": lic.company_name or "",
         "owner_user_id": lic.owner_user_id,
         "max_devices": lic.max_devices,
+        "max_users": int(getattr(lic, "max_users", 0) or 0),
+        "users_count": count_license_users(db, lic),
         "limit_uses": lic.limit_uses,
         "uses": lic.uses or 0,
         "daily_limit": lic.daily_limit or 0,
@@ -480,6 +530,7 @@ def create_license(db: Session, data: dict) -> License:
         company_name=payload.get("company_name", ""),
         owner_user_id=owner_id,
         max_devices=int(payload.get("max_devices") or 3),
+        max_users=int(payload.get("max_users") if payload.get("max_users") is not None else 0),
         limit_uses=int(payload.get("limit_uses") or 0),
         daily_limit=int(payload.get("daily_limit") or 0),
         uses=0,
@@ -612,6 +663,7 @@ def update_license(db: Session, lic: License, data: dict) -> License:
         "type",
         "company_name",
         "max_devices",
+        "max_users",
         "limit_uses",
         "daily_limit",
         "active",
