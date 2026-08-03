@@ -30,14 +30,7 @@ def product_with_variation(row: dict[str, Any]) -> str:
 def process_rows(rows: list[dict[str, Any]], today: date) -> tuple:
     """Fases 4–13 de la especificación. Retorna resumen, cant_max, reporte, prior, total_riesgo."""
     settings = get_settings()
-    # Conservar orden de aparición del Excel de entrada (no reordenar alfabético)
     input_rows = list(rows)
-    product_order: list[str] = []
-    for r in input_rows:
-        p = str(r.get("producto") or "").strip()
-        if p and p not in product_order:
-            product_order.append(p)
-    product_rank = {p: i for i, p in enumerate(product_order)}
 
     by_guia: dict[str, list] = {}
     for r in input_rows:
@@ -99,16 +92,14 @@ def process_rows(rows: list[dict[str, Any]], today: date) -> tuple:
         for c, n in cnts.items():
             unified[ukey][f"Cantidad {c}"] = unified[ukey].get(f"Cantidad {c}", 0) + n
 
-    def _resumen_sort_key(row: dict) -> tuple:
-        prod = str(row.get("PRODUCTO") or "")
-        # Combos / nombres compuestos: rank del primer producto conocido
-        rank = product_rank.get(prod, 10_000)
-        for p, i in product_rank.items():
-            if p in prod:
-                rank = min(rank, i)
-        return (rank, prod)
-
-    resumen_final = sorted(unified.values(), key=_resumen_sort_key)
+    # Resumen: A→Z por producto (y variables)
+    resumen_final = sorted(
+        unified.values(),
+        key=lambda r: (
+            str(r.get("PRODUCTO") or "").upper(),
+            str(r.get("VARIABLES") or "").upper(),
+        ),
+    )
     for row in resumen_final:
         total_unidades = 0
         for c in range(1, cant_max + 1):
@@ -120,19 +111,87 @@ def process_rows(rows: list[dict[str, Any]], today: date) -> tuple:
             row[f"Cantidad {c}"] = n_ordenes if n_ordenes > 0 else ""
         row["TOTAL_UNIDADES"] = total_unidades
 
-    # Reporte Ordenado: mismo orden de filas del Excel de entrada (orden de generación)
-    reporte = [
-        {
-            "ID ORDEN": r["id"],
-            "PRODUCTO": r["producto"],
-            "CANTIDAD": r["cantidad"],
-            "GUIA": r.get("guia") or "",
-            "CIUDAD": r.get("ciudad") or "",
-            "TRANSPORTADORA": r.get("transportadora") or "",
-            "VALOR": r.get("valor") or 0,
-        }
-        for r in input_rows
-    ]
+    # Reporte Ordenado:
+    # - Líneas normales: 1 fila por producto+variación (nombre con variación)
+    # - Combos (misma guía, ≥2 filas): 1 sola fila con detalle completo de componentes
+    #   y agrupación A→Z bajo el PRIMER producto del combo
+    reporte: list[dict[str, Any]] = []
+    guias_emitidas: set[str] = set()
+
+    for r in input_rows:
+        guia = str(r.get("guia") or "").strip()
+
+        # Combo: emitir una sola vez por número de guía
+        if guia and guia in combo_guias:
+            if guia in guias_emitidas:
+                continue
+            guias_emitidas.add(guia)
+            items = by_guia.get(guia) or [r]
+            first = items[0]
+            base_first = str(first.get("producto") or "").strip()
+            # Detalle: cada componente con variación y su cantidad
+            detalle = " + ".join(
+                f"{product_with_variation(it)} ({int(it.get('cantidad') or 1)})" for it in items
+            )
+            vars_combo = " + ".join(
+                _clean_var(it.get("variacion")) or "—" for it in items
+            )
+            ids = " / ".join(
+                dict.fromkeys(str(it.get("id") or "").strip() for it in items if it.get("id"))
+            )
+            valor_sum = sum(float(it.get("valor") or 0) for it in items)
+            ciudad = next((str(it.get("ciudad") or "").strip() for it in items if it.get("ciudad")), "")
+            carrier = next(
+                (str(it.get("transportadora") or "").strip() for it in items if it.get("transportadora")),
+                "",
+            )
+            reporte.append(
+                {
+                    # Agrupa A→Z con el primer producto del combo
+                    "PRODUCTO_BASE": base_first,
+                    "VARIACION": vars_combo,
+                    "PRODUCTO": f"COMBO · {detalle}" if detalle else f"COMBO · {base_first}",
+                    # Un combo = 1 unidad de alistamiento/empaque
+                    "CANTIDAD": 1,
+                    "GUIA": guia,
+                    "ID ORDEN": ids or str(first.get("id") or "").strip(),
+                    "TIPO": "COMBO",
+                    "CIUDAD": ciudad,
+                    "TRANSPORTADORA": carrier,
+                    "VALOR": valor_sum,
+                }
+            )
+            continue
+
+        # Orden normal (1 producto por guía) o sin guía
+        base = str(r.get("producto") or "").strip()
+        var = _clean_var(r.get("variacion"))
+        reporte.append(
+            {
+                "PRODUCTO_BASE": base,
+                "VARIACION": var,
+                "PRODUCTO": product_with_variation(r),
+                "CANTIDAD": int(r.get("cantidad") or 0),
+                "GUIA": guia,
+                "ID ORDEN": str(r.get("id") or "").strip(),
+                "TIPO": "SIN GUIA" if not guia else "NORMAL",
+                "CIUDAD": str(r.get("ciudad") or "").strip(),
+                "TRANSPORTADORA": str(r.get("transportadora") or "").strip(),
+                "VALOR": r.get("valor") or 0,
+            }
+        )
+
+    # Orden: producto base A→Z (combos caen con el 1er producto) · variación · cant · guía
+    reporte.sort(
+        key=lambda r: (
+            (r["PRODUCTO_BASE"] or "").upper(),
+            0 if r.get("TIPO") == "COMBO" else 1,  # combos del producto primero en su bloque
+            (r["VARIACION"] or "").upper(),
+            int(r["CANTIDAD"] or 0),
+            (r["GUIA"] or "").upper(),
+            (r["ID ORDEN"] or "").upper(),
+        )
+    )
 
     prior = []
     for r in input_rows:
@@ -143,7 +202,7 @@ def process_rows(rows: list[dict[str, Any]], today: date) -> tuple:
                 prior.append(
                     {
                         "N GUIA": r["guia"],
-                        "PRODUCTO": r["producto"],
+                        "PRODUCTO": product_with_variation(r),
                         "VALOR": r["valor"],
                         "FECHA GUIA": str(fg),
                         "DIAS RETRASO": dias,

@@ -266,39 +266,88 @@ def build_excel(
     apply_print_brand(ws1, co, license_code)
 
     # HOJA 2: REPORTE ORDENADO
+    # Producto base A→Z · variación · cantidad 1,2,3… · guía · id
+    # Incluye variaciones en el nombre y cada línea de COMBO con su variación
     ws2 = wb.create_sheet("Reporte Ordenado")
     ws2.sheet_properties.tabColor = P["GH"]
     ws2.sheet_view.showGridLines = False
-    ws2.column_dimensions["A"].width = 14
-    ws2.column_dimensions["B"].width = 38
-    ws2.column_dimensions["C"].width = 10
+    ncols2 = 6
+    ws2.column_dimensions["A"].width = 12
+    ws2.column_dimensions["B"].width = 36
+    ws2.column_dimensions["C"].width = 16
+    ws2.column_dimensions["D"].width = 10
+    ws2.column_dimensions["E"].width = 16
+    ws2.column_dimensions["F"].width = 14
 
-    banner(ws2, 3, f"FulfillPro · {co} — Reporte Ordenado", P["VC"], 13, 26)
-    company_strip(ws2, 3, co, company_code, license_code)
-    subtitle(ws2, 3, f"{len(reporte)} lineas | Fecha: {today_str}")
-    spacer(ws2, 3)
+    banner(ws2, ncols2, f"FulfillPro · {co} — Reporte Ordenado", P["VC"], 13, 26)
+    company_strip(ws2, ncols2, co, company_code, license_code)
+    subtitle(
+        ws2,
+        ncols2,
+        f"{len(reporte)} lineas | A→Z por producto · Combos = 1 fila bajo el 1er producto · Cant. asc | {today_str}",
+    )
+    spacer(ws2, ncols2)
 
     ws2.sheet_format.defaultRowHeight = 20
-    ws2.append(["ID ORDEN", "PRODUCTO", "CANTIDAD"])
+    ws2.append(["TIPO", "PRODUCTO", "VARIACION", "CANTIDAD", "N GUIA", "ID ORDEN"])
     r = ws2.max_row
     ws2.row_dimensions[r].height = 24
-    hdr(ws2.cell(r, 1), P["GH"])
-    hdr(ws2.cell(r, 2), P["GH"], "left")
-    hdr(ws2.cell(r, 3), P["GH"])
+    for ci in range(1, ncols2 + 1):
+        hdr(ws2.cell(r, ci), P["GH"], "left" if ci in (2, 3) else "center")
     ws2.freeze_panes = f"A{r + 1}"
 
-    prev = ""
+    prev_base = None
+    prev_var = None
+    prev_cant = None
     for i, row in enumerate(reporte):
-        is_n = row["PRODUCTO"] != prev
-        bg = P["BL"] if i % 2 == 0 else P["GL"]
-        ws2.append([str(row["ID ORDEN"]), row["PRODUCTO"], int(row["CANTIDAD"] or 0)])
-        r = ws2.max_row
-        sty(ws2.cell(r, 1), bg, "546E7A", 9, False, "center", False)
-        sty(ws2.cell(r, 2), bg, "212121", 10, is_n, "left", True)
-        sty(ws2.cell(r, 3), bg, "1565C8", 11, True, "center", False)
-        prev = row["PRODUCTO"]
+        tipo = str(row.get("TIPO") or "NORMAL")
+        base = str(row.get("PRODUCTO_BASE") or "")
+        var = str(row.get("VARIACION") or "")
+        # Nombre completo con variación (y prefijo COMBO · si aplica)
+        prod = str(row.get("PRODUCTO") or "")
+        cant = int(row.get("CANTIDAD") or 0)
+        guia = str(row.get("GUIA") or "")
+        oid = str(row.get("ID ORDEN") or "")
 
-    brand_footer(ws2, 3, footer_txt)
+        new_base = base != prev_base
+        new_var = new_base or var != prev_var
+        new_cant = new_var or cant != prev_cant
+
+        if tipo == "COMBO":
+            bg = P["AL"] if i % 2 == 0 else "FFFDE7"
+        elif new_base:
+            bg = P["VL"]
+        elif new_cant:
+            bg = P["BL"] if (cant % 2 == 0) else P["GL"]
+        else:
+            bg = P["BL"] if i % 2 == 0 else P["GL"]
+
+        ws2.append([tipo, prod, var or "—", cant, guia or "—", oid or "—"])
+        r = ws2.max_row
+        sty(ws2.cell(r, 1), bg, "E65100" if tipo == "COMBO" else "455A64", 9, tipo == "COMBO", "center", False)
+        # Combos: texto más largo → wrap y fila un poco más alta
+        sty(
+            ws2.cell(r, 2),
+            bg,
+            "E65100" if tipo == "COMBO" else ("0D3B12" if new_base else "212121"),
+            10,
+            True if tipo == "COMBO" or new_base or bool(var) else False,
+            "left",
+            True,
+        )
+        sty(ws2.cell(r, 3), bg, "1565C8" if var and var != "—" else "90A4AE", 9, bool(var and var != "—"), "left", True)
+        sty(ws2.cell(r, 4), bg, "1565C8", 11, new_cant, "center", False)
+        sty(ws2.cell(r, 5), bg, "37474F", 9, False, "center", False)
+        sty(ws2.cell(r, 6), bg, "546E7A", 9, False, "center", False)
+        if tipo == "COMBO":
+            ws2.row_dimensions[r].height = max(28, 14 + 8 * max(1, prod.count("+")))
+        elif new_base:
+            ws2.row_dimensions[r].height = 22
+        prev_base = base
+        prev_var = var
+        prev_cant = cant
+
+    brand_footer(ws2, ncols2, footer_txt)
     apply_print_brand(ws2, co, license_code)
 
     # HOJA 3: PRIORITARIAS
