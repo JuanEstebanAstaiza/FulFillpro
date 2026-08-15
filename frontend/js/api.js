@@ -152,6 +152,24 @@ const API = {
   dispatchStats(days = 90) {
     return this.request(`/api/dispatch/stats?days=${days}`);
   },
+  announcementsActive() {
+    return this.request("/api/announcements/active");
+  },
+  announcementsList() {
+    return this.request("/api/announcements");
+  },
+  announcementCreate(payload) {
+    return this.request("/api/announcements", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  announcementDeactivate(id) {
+    return this.request(`/api/announcements/${id}/deactivate`, { method: "POST" });
+  },
+  announcementsDeactivateAll() {
+    return this.request("/api/announcements/deactivate-all", { method: "POST" });
+  },
   analyticsCurrent() {
     return this.request("/api/analytics/current");
   },

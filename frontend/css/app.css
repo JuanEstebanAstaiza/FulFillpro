@@ -927,6 +927,92 @@ tbody tr:hover { background: #f8fafc; }
   max-width: min(400px, calc(100vw - 2rem));
   pointer-events: none;
 }
+
+/* Avisos de plataforma (ops) — barra superior, full width */
+.announce-stack {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  pointer-events: none;
+}
+.announce-toast {
+  pointer-events: auto;
+  width: 100%;
+  margin: 0;
+  border-radius: 0;
+  border: none;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.14);
+  padding: 0.9rem 1.25rem;
+  display: flex;
+  gap: 0.85rem;
+  align-items: flex-start;
+  opacity: 1;
+  transition: opacity 0.85s ease, transform 0.85s ease;
+  transform: translateY(0);
+  cursor: default;
+}
+.announce-toast.announce-out {
+  opacity: 0;
+  transform: translateY(-12px);
+}
+.announce-toast.announce-info {
+  background: linear-gradient(90deg, #0f766e 0%, #0d9488 40%, #14b8a6 100%);
+  color: #ecfdf5;
+}
+.announce-toast.announce-warn {
+  background: linear-gradient(90deg, #c2410c 0%, #ea580c 45%, #f97316 100%);
+  color: #fff7ed;
+}
+.announce-toast.announce-danger {
+  background: linear-gradient(90deg, #991b1b 0%, #dc2626 50%, #ef4444 100%);
+  color: #fef2f2;
+}
+.announce-toast.announce-ok {
+  background: linear-gradient(90deg, #14532d 0%, #15803d 45%, #22c55e 100%);
+  color: #f0fdf4;
+}
+.announce-toast .announce-ico {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.18);
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+.announce-toast .announce-body {
+  flex: 1;
+  min-width: 0;
+}
+.announce-toast .announce-body strong {
+  display: block;
+  font-size: 0.95rem;
+  letter-spacing: 0.01em;
+}
+.announce-toast .announce-body p {
+  margin: 0.25rem 0 0;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  opacity: 0.95;
+  white-space: pre-wrap;
+}
+.announce-toast .announce-hint {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  opacity: 0.8;
+  align-self: center;
+  max-width: 9rem;
+  text-align: right;
+}
 .toast {
   pointer-events: auto;
   background: #fff;

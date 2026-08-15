@@ -20,6 +20,7 @@ from backend.app.models.user import User
 from backend.app.routers import (
     admin,
     analytics,
+    announcements,
     auth,
     company,
     dispatch,
@@ -71,6 +72,7 @@ app.include_router(legal.router)
 app.include_router(company.router)
 app.include_router(analytics.router)
 app.include_router(dispatch.router)
+app.include_router(announcements.router)
 
 
 def _safe_alter(sql: str) -> None:

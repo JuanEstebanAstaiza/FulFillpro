@@ -75,8 +75,9 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      # Solo localhost en el host (Cloudflared en la misma VM)
-      - "127.0.0.1:8000:8000"
+      # Solo localhost. Override: API_HOST_PORT=8002 docker compose up -d
+      # Producción/Cloudflared: dejar 8000 (default)
+      - "127.0.0.1:${API_HOST_PORT:-8000}:8000"
     env_file:
       - .env
     environment:

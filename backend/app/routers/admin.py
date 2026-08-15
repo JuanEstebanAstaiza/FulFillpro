@@ -207,28 +207,35 @@ def reset_uses(
 @router.post("/licenses/{license_id}/renew")
 def renew(
     license_id: UUID,
-    days: int = Query(30, ge=1, le=3660),
+    days: int = Query(30, ge=-3660, le=3660, description="Días a sumar (negativo acorta)"),
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    """Extiende vigencia (por defecto +30 días) sin cambiar plan ni código."""
+    """
+    Ajusta vigencia en X días sin cambiar plan ni código.
+    - days > 0: amplía desde max(hoy, vencimiento actual)
+    - days < 0: acorta desde el vencimiento actual
+    """
+    if days == 0:
+        raise HTTPException(400, "Indica un número de días distinto de 0.")
     lic = db.query(License).options(joinedload(License.devices)).filter(License.id == license_id).first()
     if not lic:
         raise HTTPException(404, "Licencia no encontrada.")
+    sign = "+" if days > 0 else ""
     lic = license_service.update_license(
         db,
         lic,
         {
             "extend_days": days,
             "expiry_policy": "extend",
-            "active": True,
-            "append_note": f"Renovación rápida +{days}d",
+            "active": True if days > 0 else None,
+            "append_note": f"Ajuste de vigencia {sign}{days}d",
         },
     )
     log_access(
         db,
         event_type="admin",
-        detail=f"Licencia {lic.code} renovada +{days}d → vence {lic.expiry}",
+        detail=f"Licencia {lic.code} vigencia {sign}{days}d → vence {lic.expiry}",
         user_id=admin.id,
         license_code=lic.code,
     )

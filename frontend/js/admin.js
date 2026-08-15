@@ -39,6 +39,14 @@ async function init() {
   $("#form-template")?.addEventListener("submit", saveTemplateForm);
   $("#template").addEventListener("change", applyTemplateHints);
   $("#edit-template")?.addEventListener("change", onEditTemplateChange);
+  $("#edit-expiry-policy")?.addEventListener("change", updateExpiryPreview);
+  $("#edit-duration")?.addEventListener("input", updateExpiryPreview);
+  $("#edit-expiry")?.addEventListener("change", () => {
+    if ($("#edit-expiry")?.value) {
+      $("#edit-expiry-policy").value = "set_absolute";
+    }
+    updateExpiryPreview();
+  });
   $("#tpl-reset-btn")?.addEventListener("click", resetTemplateForm);
 
   $("#btn-backup-refresh")?.addEventListener("click", () => loadBackupInfo());
@@ -46,6 +54,15 @@ async function init() {
   $("#btn-backup-inspect")?.addEventListener("click", inspectBackup);
   $("#btn-backup-restore")?.addEventListener("click", restoreBackup);
   $("#backup-include-storage")?.addEventListener("change", () => loadBackupInfo());
+  $("#form-announcement")?.addEventListener("submit", publishAnnouncement);
+  $("#btn-ann-deactivate-all")?.addEventListener("click", deactivateAllAnnouncements);
+
+  // Pestaña avisos
+  $$(".tab[data-tab]").forEach((t) => {
+    t.addEventListener("click", () => {
+      if (t.dataset.tab === "announcements") loadAnnouncements();
+    });
+  });
 
   await Promise.all([
     loadOverview(),
@@ -56,6 +73,86 @@ async function init() {
     loadLogs(),
     loadIncidents(),
   ]);
+}
+
+async function loadAnnouncements() {
+  const body = $("#announcements-body");
+  if (!body) return;
+  try {
+    const data = await API.announcementsList();
+    const items = data.items || [];
+    if (!items.length) {
+      body.innerHTML = `<tr><td colspan="6" class="muted">Aún no hay avisos publicados.</td></tr>`;
+      return;
+    }
+    body.innerHTML = items
+      .map((a) => {
+        const when = a.created_at ? new Date(a.created_at).toLocaleString() : "—";
+        const st = a.active
+          ? `<span class="badge badge-ok">activo</span>`
+          : `<span class="badge badge-muted">off</span>`;
+        const act = a.active
+          ? `<button class="btn btn-sm btn-ghost" type="button" data-action="ann-off" data-id="${escape(
+              a.id
+            )}">Desactivar</button>`
+          : "—";
+        return `<tr>
+          <td class="muted">${escape(when)}</td>
+          <td><span class="badge badge-muted">${escape(a.severity)}</span></td>
+          <td><strong>${escape(a.title)}</strong></td>
+          <td>${escape((a.message || "").slice(0, 120))}${(a.message || "").length > 120 ? "…" : ""}</td>
+          <td>${st}</td>
+          <td>${act}</td>
+        </tr>`;
+      })
+      .join("");
+  } catch (err) {
+    body.innerHTML = `<tr><td colspan="6">${escape(err.message)}</td></tr>`;
+  }
+}
+
+async function publishAnnouncement(e) {
+  e.preventDefault();
+  const title = ($("#ann-title")?.value || "Aviso de plataforma").trim();
+  const message = ($("#ann-message")?.value || "").trim();
+  const severity = $("#ann-severity")?.value || "info";
+  const ttlRaw = $("#ann-ttl")?.value;
+  if (!message) {
+    showAdminAlert("Escribe el mensaje del aviso.");
+    return;
+  }
+  const payload = { title, message, severity };
+  const ttl = parseInt(ttlRaw, 10);
+  if (Number.isFinite(ttl) && ttl > 0) payload.ttl_minutes = ttl;
+  try {
+    await API.announcementCreate(payload);
+    $("#ann-message").value = "";
+    await loadAnnouncements();
+    showAdminAlert("Aviso publicado. Los usuarios lo verán en segundos (toast superior).", "ok");
+  } catch (err) {
+    showAdminAlert(err.message);
+  }
+}
+
+async function deactivateAllAnnouncements() {
+  if (!confirm("¿Desactivar todos los avisos activos?")) return;
+  try {
+    const r = await API.announcementsDeactivateAll();
+    await loadAnnouncements();
+    showAdminAlert(`Desactivados: ${r.deactivated || 0}`, "ok");
+  } catch (err) {
+    showAdminAlert(err.message);
+  }
+}
+
+async function deactivateAnnouncement(id) {
+  try {
+    await API.announcementDeactivate(id);
+    await loadAnnouncements();
+    showAdminAlert("Aviso desactivado.", "ok");
+  } catch (err) {
+    showAdminAlert(err.message);
+  }
 }
 
 function showAdminAlert(message, type = "error") {
@@ -304,7 +401,8 @@ async function loadLicenses() {
           <button class="btn btn-sm btn-primary" type="button" data-action="edit-lic" data-id="${escape(l.id)}">Editar plan</button>
           <button class="btn btn-sm btn-ghost" type="button" data-action="toggle-lic" data-id="${escape(l.id)}">Toggle</button>
           <button class="btn btn-sm btn-ghost" type="button" data-action="reset-uses" data-id="${escape(l.id)}">Reset usos</button>
-          <button class="btn btn-sm btn-ghost" type="button" data-action="renew-lic" data-id="${escape(l.id)}">+30d</button>
+          <button class="btn btn-sm btn-ghost" type="button" data-action="renew-lic" data-id="${escape(l.id)}" title="Sumar 30 días">+30d</button>
+          <button class="btn btn-sm btn-ghost" type="button" data-action="renew-lic-custom" data-id="${escape(l.id)}" title="Sumar o restar X días">±Xd</button>
         </td>
       </tr>`;
     })
@@ -326,17 +424,90 @@ function openLicenseEdit(id) {
   $("#edit-limit").value = lic.limit_uses ?? 0;
   $("#edit-daily").value = lic.daily_limit ?? 0;
   $("#edit-devices").value = lic.max_devices ?? 5;
-  $("#edit-expiry-policy").value = "extend";
+  // Por defecto no tocar la fecha (evita cambios raros al guardar solo cupos)
+  $("#edit-expiry-policy").value = "keep";
   $("#edit-duration").value = "";
-  $("#edit-expiry").value = lic.expiry || "";
+  $("#edit-expiry").value = lic.expiry ? String(lic.expiry).slice(0, 10) : "";
   $("#edit-count-global").checked = !!lic.count_toward_global;
   $("#edit-enforce-daily").checked = !!lic.enforce_daily_limit;
   $("#edit-active").checked = !!lic.active;
   $("#edit-reset-uses").checked = false;
   $("#edit-note").value = "";
+  const left =
+    lic.days_left == null ? "sin fecha (∞)" : lic.days_left < 0 ? `vencida hace ${-lic.days_left}d` : `${lic.days_left}d restantes`;
+  if ($("#edit-expiry-current")) {
+    $("#edit-expiry-current").textContent = `Actual: ${lic.expiry || "sin fecha"} · ${left}`;
+  }
+  updateExpiryPreview();
   const ov = $("#lic-edit-overlay");
   ov.classList.remove("hidden");
   ov.setAttribute("aria-hidden", "false");
+}
+
+function parseYmd(s) {
+  if (!s) return null;
+  const p = String(s).slice(0, 10).split("-").map(Number);
+  if (p.length !== 3 || !p[0]) return null;
+  return new Date(p[0], p[1] - 1, p[2]);
+}
+
+function formatYmd(d) {
+  if (!d || Number.isNaN(d.getTime())) return "—";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function updateExpiryPreview() {
+  const el = $("#edit-expiry-preview");
+  if (!el) return;
+  const id = $("#edit-lic-id")?.value;
+  const lic = licensesCache.find((x) => String(x.id) === String(id));
+  const policy = $("#edit-expiry-policy")?.value || "keep";
+  const days = numOrNull($("#edit-duration")?.value);
+  const abs = $("#edit-expiry")?.value;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  let current = parseYmd(lic?.expiry) || null;
+  let result = current;
+  let note = "";
+
+  if (policy === "keep") {
+    note = "Sin cambios de fecha";
+  } else if (policy === "clear") {
+    result = null;
+    note = "Quedará sin fecha de vencimiento";
+  } else if (policy === "set_absolute") {
+    result = parseYmd(abs);
+    note = result ? "Fecha fija" : "Indica una fecha válida";
+  } else if (policy === "replace_from_today") {
+    const d = days && days > 0 ? days : null;
+    if (d) {
+      result = new Date(today);
+      result.setDate(result.getDate() + d);
+      note = `Hoy + ${d} días`;
+    } else {
+      note = "Indica días > 0";
+    }
+  } else if (policy === "extend") {
+    if (days && days !== 0) {
+      const base =
+        days > 0
+          ? current && current > today
+            ? new Date(current)
+            : new Date(today)
+          : current
+          ? new Date(current)
+          : new Date(today);
+      base.setDate(base.getDate() + days);
+      result = base;
+      note = days > 0 ? `Ampliar ${days}d` : `Acortar ${-days}d`;
+    } else {
+      note = "Indica días (ej. 15 o -10)";
+    }
+  }
+  el.textContent = `${formatYmd(result)}${note ? " · " + note : ""}`;
 }
 
 function closeLicenseEdit() {
@@ -360,12 +531,17 @@ function onEditTemplateChange() {
   $("#edit-label").value = p.label_default || p.name || "";
   $("#edit-count-global").checked = !!p.count_toward_global;
   $("#edit-enforce-daily").checked = !!p.enforce_daily_limit;
+  updateExpiryPreview();
 }
 
 async function saveLicenseEdit(e) {
   e.preventDefault();
   const id = $("#edit-lic-id").value;
   if (!id) return;
+  const policy = $("#edit-expiry-policy").value || "keep";
+  const days = numOrNull($("#edit-duration").value);
+  const exp = ($("#edit-expiry").value || "").trim();
+
   const body = {
     type: $("#edit-type").value.trim() || undefined,
     label: $("#edit-label").value.trim() || undefined,
@@ -373,7 +549,7 @@ async function saveLicenseEdit(e) {
     max_devices: numOrNull($("#edit-devices").value),
     limit_uses: numOrNull($("#edit-limit").value),
     daily_limit: numOrNull($("#edit-daily").value),
-    expiry_policy: $("#edit-expiry-policy").value || "keep",
+    expiry_policy: policy,
     count_toward_global: $("#edit-count-global").checked,
     enforce_daily_limit: $("#edit-enforce-daily").checked,
     active: $("#edit-active").checked,
@@ -383,23 +559,34 @@ async function saveLicenseEdit(e) {
   };
   const tpl = $("#edit-template").value;
   if (tpl) body.template = tpl;
-  const days = numOrNull($("#edit-duration").value);
-  const policy = body.expiry_policy;
-  if (policy === "extend" && days) body.extend_days = days;
-  if (policy === "replace_from_today" && days) body.duration_days = days;
-  if (policy === "set_absolute") {
-    const exp = $("#edit-expiry").value;
+
+  if (policy === "extend") {
+    if (days == null || days === 0) {
+      // Solo cupos/otros campos: no tocar fecha
+      body.expiry_policy = "keep";
+    } else {
+      body.extend_days = days;
+      body.append_note =
+        body.append_note || (days > 0 ? `Ampliación +${days}d` : `Reducción ${days}d`);
+    }
+  } else if (policy === "replace_from_today") {
+    if (!days || days <= 0) {
+      showAdminAlert("Para “Nuevo ciclo desde hoy” indica un número de días mayor que 0.");
+      return;
+    }
+    body.duration_days = days;
+  } else if (policy === "set_absolute") {
     if (!exp) {
-      showAdminAlert("Indica la fecha de vencimiento para política “Fecha fija”.");
+      showAdminAlert("Indica la fecha de vencimiento exacta.");
       return;
     }
     body.expiry = exp;
+  } else if (policy === "clear") {
+    body.expiry_policy = "clear";
+  } else {
+    body.expiry_policy = "keep";
   }
-  if (policy === "keep") {
-    delete body.extend_days;
-    delete body.duration_days;
-  }
-  // Si hay plantilla y no hay días, el backend usa la duración de plantilla
+
   Object.keys(body).forEach((k) => {
     if (body[k] === undefined || body[k] === null || body[k] === "") delete body[k];
   });
@@ -739,9 +926,28 @@ async function resetUses(id) {
   await loadLicenses();
 }
 async function renewLic(id, days = 30) {
+  if (!days || days === 0) {
+    showAdminAlert("Indica un número de días distinto de 0.");
+    return;
+  }
   await API.request(`/api/admin/licenses/${id}/renew?days=${days}`, { method: "POST" });
   await loadLicenses();
-  showAdminAlert(`Vigencia extendida +${days} días.`, "ok");
+  const sign = days > 0 ? `+${days}` : `${days}`;
+  showAdminAlert(`Vigencia ajustada ${sign} días.`, "ok");
+}
+
+async function renewLicCustom(id) {
+  const raw = prompt(
+    "¿Cuántos días sumar o restar?\nEjemplos: 15 · 45 · 120 · -10 · -30",
+    "15"
+  );
+  if (raw == null || raw.trim() === "") return;
+  const days = parseInt(raw.trim(), 10);
+  if (!Number.isFinite(days) || days === 0) {
+    showAdminAlert("Valor inválido. Usa un entero distinto de 0 (ej. 15 o -10).");
+    return;
+  }
+  await renewLic(id, days);
 }
 async function toggleUser(id) {
   await API.request(`/api/admin/users/${id}/toggle`, { method: "POST" });
@@ -784,6 +990,9 @@ document.addEventListener("click", (e) => {
   } else if (action === "renew-lic") {
     e.preventDefault();
     renewLic(id, 30);
+  } else if (action === "renew-lic-custom") {
+    e.preventDefault();
+    renewLicCustom(id);
   } else if (action === "edit-lic") {
     e.preventDefault();
     openLicenseEdit(id);
@@ -795,7 +1004,9 @@ document.addEventListener("click", (e) => {
     const days = parseInt(btn.dataset.days || "30", 10);
     $("#edit-expiry-policy").value = "extend";
     $("#edit-duration").value = days;
-    $("#edit-note").value = $("#edit-note").value || `Extensión rápida +${days}d`;
+    const sign = days > 0 ? `+${days}` : `${days}`;
+    $("#edit-note").value = $("#edit-note").value || `Ajuste de vigencia ${sign}d`;
+    updateExpiryPreview();
   } else if (action === "quick-annual") {
     e.preventDefault();
     const annual =
@@ -829,6 +1040,12 @@ document.addEventListener("click", (e) => {
   } else if (action === "delete-user") {
     e.preventDefault();
     deleteUser(id);
+  } else if (action === "ann-off") {
+    e.preventDefault();
+    deactivateAnnouncement(id);
+  } else if (action === "ann-deactivate-all") {
+    e.preventDefault();
+    deactivateAllAnnouncements();
   } else if (action === "resolve-inc") {
     e.preventDefault();
     resolveInc(id);

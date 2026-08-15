@@ -27,6 +27,7 @@
         <button class="tab nav-item" data-tab="logs" type="button"><span class="ico">☰</span> Logs</button>
         <button class="tab nav-item" data-tab="incidents" type="button"><span class="ico">!</span> Incidentes</button>
         <button class="tab nav-item" data-tab="backup" type="button"><span class="ico">⬇</span> Backup</button>
+        <button class="tab nav-item" data-tab="announcements" type="button"><span class="ico">📣</span> Avisos</button>
       </nav>
       <div class="sidebar-foot">
         <div class="user-chip">
@@ -303,25 +304,50 @@
                     <label for="edit-devices">Máx. equipos</label>
                     <input id="edit-devices" type="number" min="1" />
                   </div>
-                  <div class="field">
-                    <label for="edit-expiry-policy">Política de vigencia</label>
-                    <select id="edit-expiry-policy">
-                      <option value="extend">Extender desde vencimiento actual (o hoy)</option>
-                      <option value="replace_from_today">Nuevo ciclo desde hoy</option>
-                      <option value="set_absolute">Fecha fija</option>
-                      <option value="keep">No cambiar fecha</option>
-                    </select>
+                </div>
+
+                <div class="card" style="margin:0.75rem 0;padding:0.85rem 1rem;background:#f8fafc;border:1px solid var(--line)">
+                  <h3 style="margin:0 0 0.5rem;font-size:0.95rem">Vigencia (días y fecha)</h3>
+                  <p class="hint" id="edit-expiry-current" style="margin:0 0 0.75rem">Vence: —</p>
+                  <div class="grid-2">
+                    <div class="field">
+                      <label for="edit-expiry-policy">Qué hacer con la fecha</label>
+                      <select id="edit-expiry-policy">
+                        <option value="keep">No cambiar la fecha</option>
+                        <option value="extend">Sumar / restar X días al vencimiento</option>
+                        <option value="set_absolute">Fijar fecha exacta</option>
+                        <option value="replace_from_today">Nuevo ciclo: hoy + X días</option>
+                        <option value="clear">Quitar vencimiento (sin fecha)</option>
+                      </select>
+                    </div>
+                    <div class="field">
+                      <label for="edit-duration">X días (+ amplía · − acorta)</label>
+                      <input id="edit-duration" type="number" step="1" placeholder="Ej: 15, 45, -10, 120" />
+                      <div class="hint">Cualquier entero: 7, 15, 30, 90, 365 o negativos para reducir.</div>
+                    </div>
+                    <div class="field">
+                      <label for="edit-expiry">Fecha de vencimiento exacta</label>
+                      <input id="edit-expiry" type="date" />
+                      <div class="hint">Al elegir fecha se usa “Fijar fecha exacta”.</div>
+                    </div>
+                    <div class="field">
+                      <label>Vista previa</label>
+                      <div id="edit-expiry-preview" class="mono" style="padding:0.55rem 0.65rem;background:#fff;border:1px solid var(--line);border-radius:8px;min-height:2.4rem">—</div>
+                    </div>
                   </div>
-                  <div class="field">
-                    <label for="edit-duration">Días (duration / extend)</label>
-                    <input id="edit-duration" type="number" min="1" placeholder="30, 365…" />
-                    <div class="hint">Mensual→anual: plantilla Pro o 365 + “Nuevo ciclo desde hoy”.</div>
-                  </div>
-                  <div class="field">
-                    <label for="edit-expiry">Fecha de vencimiento (si “Fecha fija”)</label>
-                    <input id="edit-expiry" type="date" />
+                  <div class="row-actions" style="gap:0.4rem;flex-wrap:wrap;margin-top:0.35rem">
+                    <button type="button" class="btn btn-ghost btn-sm" data-action="quick-extend" data-days="7">+7d</button>
+                    <button type="button" class="btn btn-ghost btn-sm" data-action="quick-extend" data-days="15">+15d</button>
+                    <button type="button" class="btn btn-ghost btn-sm" data-action="quick-extend" data-days="30">+30d</button>
+                    <button type="button" class="btn btn-ghost btn-sm" data-action="quick-extend" data-days="90">+90d</button>
+                    <button type="button" class="btn btn-ghost btn-sm" data-action="quick-extend" data-days="365">+365d</button>
+                    <button type="button" class="btn btn-ghost btn-sm" data-action="quick-extend" data-days="-7">−7d</button>
+                    <button type="button" class="btn btn-ghost btn-sm" data-action="quick-extend" data-days="-15">−15d</button>
+                    <button type="button" class="btn btn-ghost btn-sm" data-action="quick-extend" data-days="-30">−30d</button>
+                    <button type="button" class="btn btn-ghost btn-sm" data-action="quick-annual">Upgrade anual (Pro)</button>
                   </div>
                 </div>
+
                 <div class="field">
                   <label><input id="edit-count-global" type="checkbox" style="width:auto;margin-right:0.4rem" /> Contar en cupo global</label>
                 </div>
@@ -336,12 +362,7 @@
                 </div>
                 <div class="field">
                   <label for="edit-note">Nota del cambio (historial)</label>
-                  <input id="edit-note" placeholder="Ej. Upgrade mensual → anual pagado 2026-07-21" />
-                </div>
-                <div class="row-actions" style="gap:0.5rem;flex-wrap:wrap;margin-top:0.5rem">
-                  <button type="button" class="btn btn-ghost btn-sm" data-action="quick-extend" data-days="30">+30 días</button>
-                  <button type="button" class="btn btn-ghost btn-sm" data-action="quick-extend" data-days="365">+365 días</button>
-                  <button type="button" class="btn btn-ghost btn-sm" data-action="quick-annual">Upgrade anual (Pro)</button>
+                  <input id="edit-note" placeholder="Ej. Ampliación +45 días por cortesía" />
                 </div>
               </div>
               <div class="admin-modal-footer">
@@ -453,6 +474,63 @@
               </button>
             </div>
             <pre id="backup-restore-result" class="mono" style="margin-top:1rem;white-space:pre-wrap;font-size:0.82rem;max-height:240px;overflow:auto"></pre>
+          </div>
+        </section>
+
+        <section data-panel="announcements" class="hidden">
+          <div class="card">
+            <h2>Avisos a todos los usuarios</h2>
+            <p class="lead">
+              Antes de un mantenimiento o deploy, escribe el mensaje. Aparecerá como
+              <strong>toast en la parte superior</strong> a todos los usuarios logueados
+              (se oculta a los 20s o al pasar el cursor, con fade-out).
+            </p>
+            <form id="form-announcement">
+              <div class="grid-2">
+                <div class="field">
+                  <label for="ann-title">Título</label>
+                  <input id="ann-title" maxlength="200" placeholder="Mantenimiento programado" value="Aviso de plataforma" />
+                </div>
+                <div class="field">
+                  <label for="ann-severity">Tipo</label>
+                  <select id="ann-severity">
+                    <option value="info">Información</option>
+                    <option value="warn">Advertencia</option>
+                    <option value="danger">Crítico / caída</option>
+                    <option value="ok">OK / finalizado</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="ann-ttl">Auto-desactivar (minutos, opcional)</label>
+                  <input id="ann-ttl" type="number" min="1" max="10080" placeholder="Vacío = hasta desactivar a mano" />
+                  <div class="hint">Ej. 60 = el aviso deja de mostrarse a la hora.</div>
+                </div>
+              </div>
+              <div class="field">
+                <label for="ann-message">Mensaje</label>
+                <textarea id="ann-message" rows="4" maxlength="2000" required placeholder="En 10 minutos reiniciaremos el servidor para aplicar mejoras. Guarda tu trabajo."></textarea>
+              </div>
+              <div class="row-actions" style="gap:0.6rem;flex-wrap:wrap">
+                <button class="btn btn-primary" type="submit">Publicar aviso</button>
+                <button class="btn btn-ghost" type="button" id="btn-ann-deactivate-all" data-action="ann-deactivate-all">Desactivar todos</button>
+              </div>
+            </form>
+          </div>
+          <div class="card">
+            <h2>Historial de avisos</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Tipo</th>
+                  <th>Título</th>
+                  <th>Mensaje</th>
+                  <th>Estado</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="announcements-body"></tbody>
+            </table>
           </div>
         </section>
       </div>

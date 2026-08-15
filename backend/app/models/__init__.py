@@ -10,6 +10,7 @@ from backend.app.models.analytics import (
     AnalyticsConsolidation,
 )
 from backend.app.models.dispatch import DispatchDay, DispatchGuia
+from backend.app.models.announcement import PlatformAnnouncement
 
 __all__ = [
     "User",
@@ -27,4 +28,5 @@ __all__ = [
     "AnalyticsConsolidation",
     "DispatchDay",
     "DispatchGuia",
+    "PlatformAnnouncement",
 ]

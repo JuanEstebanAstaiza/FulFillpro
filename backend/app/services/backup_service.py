@@ -36,6 +36,7 @@ from backend.app.models.analytics import (
 from backend.app.models.audit import AccessLog, SecurityEvent
 from backend.app.models.device import Device
 from backend.app.models.legal import LegalDocument, UserConsent
+from backend.app.models.announcement import PlatformAnnouncement
 from backend.app.models.dispatch import DispatchDay, DispatchGuia
 from backend.app.models.license import License, LicenseTemplate
 from backend.app.models.order import Order, OrderFile
@@ -60,6 +61,7 @@ TABLE_MODELS: list[tuple[str, Any]] = [
     ("analytics_consolidations", AnalyticsConsolidation),
     ("dispatch_days", DispatchDay),
     ("dispatch_guias", DispatchGuia),
+    ("platform_announcements", PlatformAnnouncement),
     ("access_logs", AccessLog),
     ("security_events", SecurityEvent),
 ]
@@ -68,6 +70,7 @@ TABLE_MODELS: list[tuple[str, Any]] = [
 CLEAR_ORDER = [
     "security_events",
     "access_logs",
+    "platform_announcements",
     "dispatch_guias",
     "dispatch_days",
     "analytics_consolidations",

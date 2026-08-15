@@ -120,6 +120,7 @@ async function onLegalSign() {
 
 async function enterApp() {
   setLoggedIn(true);
+  startAnnouncementPolling();
   renderUser();
   const ok = await ensureConsent();
   if (ok) showView("dashboard");
@@ -280,8 +281,11 @@ async function onLogout() {
     API.clearTokens();
   }
   currentUser = null;
+  stopAnnouncementPolling();
   setLoggedIn(false);
   $("#legal-overlay").classList.add("hidden");
+  const stack = $("#announce-stack");
+  if (stack) stack.innerHTML = "";
 }
 
 function pickFile(file) {
@@ -327,6 +331,100 @@ function showToast(title, message, type = "warn", duration = 6500) {
     el.style.transition = "opacity .3s";
     setTimeout(() => el.remove(), 320);
   }, duration);
+}
+
+/** Avisos publicados desde Ops — barra superior, 20s o hover → fade out */
+const ANNOUNCE_SEEN_KEY = "fp_announcement_seen";
+let _announcePollTimer = null;
+const _announceShown = new Set();
+
+function _announceSeenSet() {
+  try {
+    const raw = sessionStorage.getItem(ANNOUNCE_SEEN_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(arr) ? arr : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function _markAnnounceSeen(id) {
+  const s = _announceSeenSet();
+  s.add(String(id));
+  // conservar últimos 40
+  const arr = [...s].slice(-40);
+  sessionStorage.setItem(ANNOUNCE_SEEN_KEY, JSON.stringify(arr));
+}
+
+function dismissAnnounceToast(el) {
+  if (!el || el.dataset.leaving === "1") return;
+  el.dataset.leaving = "1";
+  el.classList.add("announce-out");
+  setTimeout(() => el.remove(), 900);
+}
+
+function showPlatformAnnouncement(item) {
+  const stack = $("#announce-stack");
+  if (!stack || !item) return;
+  const id = String(item.id || "");
+  if (!id || _announceShown.has(id)) return;
+  _announceShown.add(id);
+
+  const sev = ["info", "warn", "danger", "ok"].includes(item.severity) ? item.severity : "info";
+  const ico = sev === "ok" ? "✓" : sev === "danger" ? "!" : sev === "warn" ? "⚠" : "ℹ";
+  const el = document.createElement("div");
+  el.className = `announce-toast announce-${sev}`;
+  el.dataset.announceId = id;
+  el.innerHTML = `
+    <div class="announce-ico">${ico}</div>
+    <div class="announce-body">
+      <strong>${escapeHtml(item.title || "Aviso de plataforma")}</strong>
+      <p>${escapeHtml(item.message || "")}</p>
+    </div>
+    <div class="announce-hint">Pasa el cursor para cerrar · 20s</div>`;
+
+  const leave = () => {
+    _markAnnounceSeen(id);
+    dismissAnnounceToast(el);
+  };
+
+  // Cerrar al pasar el cursor (hover)
+  el.addEventListener("mouseenter", leave, { once: true });
+  // También al tocar en móvil
+  el.addEventListener("touchstart", leave, { once: true, passive: true });
+
+  stack.prepend(el);
+  // Auto fade-out a los 20s
+  setTimeout(leave, 20000);
+}
+
+async function pollPlatformAnnouncements() {
+  if (!API.token) return;
+  try {
+    const data = await API.announcementsActive();
+    const seen = _announceSeenSet();
+    const items = data.items || [];
+    for (const it of items) {
+      if (!seen.has(String(it.id))) {
+        showPlatformAnnouncement(it);
+      }
+    }
+  } catch {
+    // silencioso (sesión caducada, red, etc.)
+  }
+}
+
+function startAnnouncementPolling() {
+  if (_announcePollTimer) return;
+  pollPlatformAnnouncements();
+  _announcePollTimer = setInterval(pollPlatformAnnouncements, 25000);
+}
+
+function stopAnnouncementPolling() {
+  if (_announcePollTimer) {
+    clearInterval(_announcePollTimer);
+    _announcePollTimer = null;
+  }
 }
 
 async function onProcess() {

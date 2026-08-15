@@ -567,59 +567,95 @@ def _snapshot_license(lic: License) -> dict[str, Any]:
     }
 
 
+def _parse_expiry_value(expiry: Any) -> Optional[date]:
+    """Normaliza fecha de vencimiento desde date o string ISO (YYYY-MM-DD)."""
+    if expiry is None or expiry == "":
+        return None
+    if isinstance(expiry, datetime):
+        return expiry.date()
+    if isinstance(expiry, date):
+        return expiry
+    if isinstance(expiry, str):
+        text = expiry.strip()[:10]
+        try:
+            return date.fromisoformat(text)
+        except Exception as e:
+            raise HTTPException(400, f"Fecha de vencimiento inválida: {expiry}") from e
+    raise HTTPException(400, f"Tipo de fecha no soportado: {type(expiry)}")
+
+
 def _apply_expiry_policy(
     lic: License,
     *,
     expiry_policy: str = "keep",
     duration_days: Optional[int] = None,
     extend_days: Optional[int] = None,
-    expiry: Optional[date] = None,
+    expiry: Optional[Any] = None,
 ) -> None:
     """
     Políticas de vigencia al editar una licencia activa:
       - keep: no toca expiry
-      - set_absolute: usa `expiry` tal cual
-      - replace_from_today: expiry = hoy + duration_days
-      - extend: suma días desde max(hoy, expiry actual)
-        (usa extend_days o duration_days)
+      - set_absolute: fija `expiry` exactamente (permite adelantar o retrasar)
+      - replace_from_today: expiry = hoy + duration_days (>0)
+      - extend: suma X días (X puede ser negativo para acortar) desde
+        max(hoy, expiry actual) si X>0; si X<0 desde expiry actual (o hoy si no hay)
+      - clear: quita vencimiento (ilimitada en tiempo)
     """
     policy = (expiry_policy or "keep").strip().lower()
     if policy in {"", "keep", "none"}:
         if extend_days is not None and int(extend_days) != 0:
             policy = "extend"
-        elif expiry is not None:
+        elif expiry is not None and expiry != "":
             policy = "set_absolute"
-        elif duration_days is not None:
+        elif duration_days is not None and int(duration_days) > 0:
             policy = "replace_from_today"
         else:
             return
 
     today = date.today()
+
+    if policy == "clear":
+        lic.expiry = None
+        return
+
     if policy == "set_absolute":
-        if expiry is None:
-            raise HTTPException(400, "expiry_policy=set_absolute requiere fecha expiry.")
-        lic.expiry = expiry
+        parsed = _parse_expiry_value(expiry)
+        if parsed is None:
+            raise HTTPException(400, "Indica la fecha de vencimiento (YYYY-MM-DD).")
+        lic.expiry = parsed
         return
 
     if policy == "replace_from_today":
         days = int(duration_days if duration_days is not None else extend_days or 0)
         if days <= 0:
-            raise HTTPException(400, "duration_days debe ser > 0 para replace_from_today.")
+            raise HTTPException(400, "Para 'nuevo ciclo desde hoy' indica días > 0.")
         lic.expiry = today + timedelta(days=days)
         return
 
     if policy == "extend":
-        days = int(extend_days if extend_days is not None else duration_days or 0)
-        if days <= 0:
-            raise HTTPException(400, "extend_days/duration_days debe ser > 0 para extend.")
-        base = lic.expiry if lic.expiry and lic.expiry > today else today
+        # Preferir extend_days (puede ser negativo). duration_days solo si extend no viene.
+        if extend_days is not None:
+            days = int(extend_days)
+        elif duration_days is not None:
+            days = int(duration_days)
+        else:
+            days = 0
+        if days == 0:
+            # No-op: se eligió "extender" sin cantidad (p. ej. solo se cambió cupo)
+            return
+        if days > 0:
+            # Ampliar: desde el vencimiento futuro, o desde hoy si ya venció / no hay fecha
+            base = lic.expiry if lic.expiry and lic.expiry > today else today
+        else:
+            # Acortar: desde el vencimiento actual (si no hay, desde hoy)
+            base = lic.expiry if lic.expiry else today
         lic.expiry = base + timedelta(days=days)
         return
 
     raise HTTPException(
         400,
         f"expiry_policy no válida: {expiry_policy}. "
-        "Usa keep | extend | replace_from_today | set_absolute.",
+        "Usa keep | extend | replace_from_today | set_absolute | clear.",
     )
 
 
@@ -719,9 +755,11 @@ def update_license(db: Session, lic: License, data: dict) -> License:
             },
         )
 
-    # Reactivar si venía vencida/inactiva y el cambio de plan lo pide
+    # Reactivar solo si se pidió explícitamente active=True
     if payload.get("active") is True:
         lic.active = True
+    elif payload.get("active") is False:
+        lic.active = False
 
     db.commit()
     db.refresh(lic)
@@ -744,23 +782,24 @@ def change_plan(db: Session, lic: License, data: dict) -> License:
         payload.setdefault("type", template)
 
     # Defaults de política de tiempo al cambiar de plan
-    if payload.get("expiry_policy") is None:
+    pol = payload.get("expiry_policy")
+    if pol is None or pol == "":
         if payload.get("extend_days") is not None:
             payload["expiry_policy"] = "extend"
         elif payload.get("duration_days") is not None:
-            # Upgrade típico mensual→anual: nuevo ciclo desde hoy
             payload["expiry_policy"] = "replace_from_today"
         elif payload.get("expiry") is not None:
             payload["expiry_policy"] = "set_absolute"
         else:
-            # Si hay template con duración implícita vía apply_template
+            # Plantilla sin política explícita: solo cupos, NO reescribir fecha
+            # (antes forzaba replace_from_today y “alargaba raro” la licencia)
             if template and apply_quotas:
-                resolved = resolve_template_payload(db, str(template).strip().lower())
-                if resolved and resolved.get("duration_days"):
-                    payload.setdefault("duration_days", resolved["duration_days"])
-                payload["expiry_policy"] = "replace_from_today"
+                payload["expiry_policy"] = "keep"
             else:
                 payload["expiry_policy"] = "keep"
+    elif pol == "keep" and template and apply_quotas:
+        # No inyectar duration_days de plantilla si el admin pidió no tocar fecha
+        pass
 
     if payload.get("active") is None:
         payload["active"] = True

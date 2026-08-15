@@ -37,11 +37,11 @@ class LicenseUpdate(BaseModel):
     limit_uses: Optional[int] = None
     daily_limit: Optional[int] = None
     expiry: Optional[date] = None
-    # Extiende vigencia sin recrear licencia (días desde max(hoy, expiry actual))
+    # Suma/resta X días (negativo acorta) desde vencimiento actual
     extend_days: Optional[int] = None
     # Si se envía, calcula expiry según expiry_policy
     duration_days: Optional[int] = None
-    # replace_from_today | extend | set_absolute | keep
+    # replace_from_today | extend | set_absolute | keep | clear
     expiry_policy: Optional[str] = None
     active: Optional[bool] = None
     count_toward_global: Optional[bool] = None
@@ -70,10 +70,10 @@ class LicenseChangePlan(BaseModel):
     daily_limit: Optional[int] = None
     # Tiempo de vigencia
     duration_days: Optional[int] = None
-    extend_days: Optional[int] = None
+    extend_days: Optional[int] = None  # puede ser negativo para acortar
     expiry: Optional[date] = None
-    # replace_from_today (default si duration_days) | extend | set_absolute | keep
-    expiry_policy: str = "extend"
+    # keep | extend | replace_from_today | set_absolute | clear
+    expiry_policy: str = "keep"
     count_toward_global: Optional[bool] = None
     enforce_daily_limit: Optional[bool] = None
     active: Optional[bool] = True
