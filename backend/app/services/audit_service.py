@@ -19,18 +19,21 @@ def log_access(
     device_id: str = "",
     ip: str = "",
 ) -> None:
-    db.add(
-        AccessLog(
-            user_id=user_id,
-            license_code=license_code,
-            label=label,
-            event_type=event_type,
-            detail=detail,
-            device_id=device_id,
-            ip=ip,
+    try:
+        db.add(
+            AccessLog(
+                user_id=user_id,
+                license_code=license_code,
+                label=label,
+                event_type=event_type,
+                detail=detail,
+                device_id=device_id,
+                ip=(ip or "")[:64],
+            )
         )
-    )
-    db.commit()
+        db.commit()
+    except Exception:
+        db.rollback()
 
 
 def log_security(
@@ -45,16 +48,19 @@ def log_security(
     ip: str = "",
     meta: Optional[dict[str, Any]] = None,
 ) -> None:
-    db.add(
-        SecurityEvent(
-            severity=severity,
-            category=category,
-            title=title,
-            detail=detail,
-            user_id=user_id,
-            license_code=license_code,
-            ip=ip,
-            meta=meta or {},
+    try:
+        db.add(
+            SecurityEvent(
+                severity=severity,
+                category=category,
+                title=title,
+                detail=detail,
+                user_id=user_id,
+                license_code=license_code,
+                ip=(ip or "")[:64],
+                meta=meta or {},
+            )
         )
-    )
-    db.commit()
+        db.commit()
+    except Exception:
+        db.rollback()

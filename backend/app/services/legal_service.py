@@ -5,6 +5,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.app.models.legal import LegalDocument, UserConsent
@@ -135,8 +136,20 @@ def sign_document(
     name = (signature_name or "").strip()
     if len(name) < 3:
         raise HTTPException(400, "Debes escribir tu nombre completo como firma digital.")
+    name = name[:255]
+    ip = (ip or "")[:64]
+    user_agent = (user_agent or "")[:500]
 
-    doc = db.query(LegalDocument).filter(LegalDocument.id == document_id, LegalDocument.is_active.is_(True)).first()
+    try:
+        doc_uuid = UUID(str(document_id))
+    except Exception:
+        raise HTTPException(400, "Documento legal inválido.") from None
+
+    doc = (
+        db.query(LegalDocument)
+        .filter(LegalDocument.id == doc_uuid, LegalDocument.is_active.is_(True))
+        .first()
+    )
     if not doc:
         raise HTTPException(404, "Documento legal no encontrado o inactivo.")
 
@@ -146,14 +159,19 @@ def sign_document(
         .first()
     )
     if existing and existing.accepted:
+        if user.must_accept_terms or not user.terms_accepted_at:
+            user.must_accept_terms = False
+            user.terms_accepted_at = existing.signed_at or datetime.utcnow()
+            db.commit()
         return existing
 
+    now = datetime.utcnow()
     if existing:
         existing.signature_name = name
         existing.accepted = True
         existing.ip = ip
-        existing.user_agent = (user_agent or "")[:500]
-        existing.signed_at = datetime.utcnow()
+        existing.user_agent = user_agent
+        existing.signed_at = now
         consent = existing
     else:
         consent = UserConsent(
@@ -162,14 +180,30 @@ def sign_document(
             signature_name=name,
             accepted=True,
             ip=ip,
-            user_agent=(user_agent or "")[:500],
+            user_agent=user_agent,
+            signed_at=now,
         )
         db.add(consent)
 
     user.must_accept_terms = False
-    user.terms_accepted_at = datetime.utcnow()
-    db.commit()
-    db.refresh(consent)
+    user.terms_accepted_at = now
+    try:
+        db.commit()
+        db.refresh(consent)
+    except IntegrityError:
+        db.rollback()
+        user = db.merge(user)
+        existing = (
+            db.query(UserConsent)
+            .filter(UserConsent.user_id == user.id, UserConsent.document_id == doc.id)
+            .first()
+        )
+        if existing and existing.accepted:
+            user.must_accept_terms = False
+            user.terms_accepted_at = existing.signed_at or now
+            db.commit()
+            return existing
+        raise HTTPException(500, "No se pudo registrar la firma. Intenta de nuevo.") from None
 
     log_access(
         db,

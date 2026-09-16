@@ -20,15 +20,16 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
         response.headers.setdefault("X-XSS-Protection", "0")  # confiar en CSP moderna
 
-        # CSP: solo scripts externos (sin unsafe-inline / onclick).
-        # Chart.js CDN + JS propios en /js/*.js
+        # CSP: allowlist explícita (sin unsafe-inline en scripts).
+        # Chart.js (jsDelivr) + beacon de Cloudflare Web Analytics (túnel / fulfillpro.app).
         csp = (
             "default-src 'self'; "
-            "script-src 'self' https://cdn.jsdelivr.net; "
+            "script-src 'self' https://cdn.jsdelivr.net https://static.cloudflareinsights.com; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "font-src 'self' https://fonts.gstatic.com data:; "
             "img-src 'self' data: blob:; "
-            "connect-src 'self'; "
+            "connect-src 'self' https://cdn.jsdelivr.net https://cloudflareinsights.com "
+            "https://static.cloudflareinsights.com; "
             "frame-ancestors 'none'; "
             "base-uri 'self'; "
             "form-action 'self'; "

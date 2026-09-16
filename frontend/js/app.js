@@ -100,10 +100,12 @@ async function onLegalSign() {
     showAlert($("#legal-alert"), "Escribe tu nombre completo como firma.");
     return;
   }
-  if (!pendingDoc) {
+  if (!pendingDoc || !pendingDoc.id) {
     showAlert($("#legal-alert"), "No hay documento pendiente.");
     return;
   }
+  const btn = $("#btn-legal-sign");
+  if (btn) btn.disabled = true;
   try {
     await API.legalSign({
       document_id: pendingDoc.id,
@@ -116,6 +118,7 @@ async function onLegalSign() {
     showView("dashboard");
   } catch (err) {
     showAlert($("#legal-alert"), err.message);
+    if (btn) btn.disabled = false;
   }
 }
 
