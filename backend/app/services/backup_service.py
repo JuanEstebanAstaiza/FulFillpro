@@ -303,21 +303,12 @@ def _clear_all_tables(db: Session) -> None:
 
 
 def _reset_sequences(db: Session) -> None:
-    bind = db.get_bind()
-    if bind is None or bind.dialect.name != "postgresql":
-        return
-    for table in SERIAL_TABLES:
-        try:
-            db.execute(
-                text(
-                    f"SELECT setval(pg_get_serial_sequence('{table}', 'id'), "
-                    f"COALESCE((SELECT MAX(id) FROM {table}), 1), "
-                    f"(SELECT MAX(id) FROM {table}) IS NOT NULL)"
-                )
-            )
-        except Exception:
-            pass
-    db.commit()
+    from backend.app.database import resync_serial_sequences
+
+    try:
+        resync_serial_sequences(db)
+    except Exception:
+        db.rollback()
 
 
 def _insert_rows(db: Session, name: str, model: Any, rows: list[dict]) -> int:

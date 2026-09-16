@@ -107,6 +107,12 @@ def ensure_schema() -> None:
     _safe_alter(
         "ALTER TABLE analytics_sale_events DROP CONSTRAINT IF EXISTS analytics_sale_events_source_order_id_fkey"
     )
+    try:
+        from backend.app.database import resync_serial_sequences
+
+        resync_serial_sequences()
+    except Exception:
+        pass
 
 
 def seed_database() -> None:

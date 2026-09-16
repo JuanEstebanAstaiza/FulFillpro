@@ -192,7 +192,13 @@ def sign_document(
         db.refresh(consent)
     except IntegrityError:
         db.rollback()
-        user = db.merge(user)
+        try:
+            from backend.app.database import resync_serial_sequences
+
+            resync_serial_sequences(db)
+        except Exception:
+            db.rollback()
+        user = db.query(User).filter(User.id == user.id).first() or db.merge(user)
         existing = (
             db.query(UserConsent)
             .filter(UserConsent.user_id == user.id, UserConsent.document_id == doc.id)
@@ -203,7 +209,36 @@ def sign_document(
             user.terms_accepted_at = existing.signed_at or now
             db.commit()
             return existing
-        raise HTTPException(500, "No se pudo registrar la firma. Intenta de nuevo.") from None
+        now = datetime.utcnow()
+        consent = UserConsent(
+            user_id=user.id,
+            document_id=doc.id,
+            signature_name=name,
+            accepted=True,
+            ip=ip,
+            user_agent=user_agent,
+            signed_at=now,
+        )
+        db.add(consent)
+        user.must_accept_terms = False
+        user.terms_accepted_at = now
+        try:
+            db.commit()
+            db.refresh(consent)
+        except IntegrityError:
+            db.rollback()
+            existing = (
+                db.query(UserConsent)
+                .filter(UserConsent.user_id == user.id, UserConsent.document_id == doc.id)
+                .first()
+            )
+            if existing and existing.accepted:
+                user = db.query(User).filter(User.id == user.id).first() or db.merge(user)
+                user.must_accept_terms = False
+                user.terms_accepted_at = existing.signed_at or now
+                db.commit()
+                return existing
+            raise HTTPException(500, "No se pudo registrar la firma. Intenta de nuevo.") from None
 
     log_access(
         db,
