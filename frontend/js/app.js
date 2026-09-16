@@ -18,6 +18,7 @@ let pendingDoc = null;
 let chartUnits = null;
 let chartLines = null;
 let analyticsState = null;
+let lastChartPayload = null;
 
 function setLoggedIn(yes) {
   $("#auth-view").classList.toggle("hidden", yes);
@@ -755,14 +756,32 @@ function destroyCharts() {
   }
 }
 
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function chartUi() {
+  const dark = document.documentElement.getAttribute("data-theme") === "dark";
+  return {
+    dark,
+    tick: cssVar("--muted") || (dark ? "#8aa396" : "#64748b"),
+    grid: cssVar("--line") || (dark ? "#2a3a32" : "#e2e8f0"),
+    ink: cssVar("--ink") || (dark ? "#e8f0ea" : "#0f172a"),
+  };
+}
+
 function renderAnalyticsCharts(chart) {
   destroyCharts();
+  lastChartPayload = chart || null;
   if (!chart || !window.Chart) return;
   const labels = chart.labels || [];
   const units = chart.units || [];
   const lines = chart.lines || [];
-  const colors = labels.map(
-    (_, i) => `hsl(${(140 + i * 28) % 360} 55% ${42 + (i % 3) * 6}%)`
+  const ui = chartUi();
+  const colors = labels.map((_, i) =>
+    ui.dark
+      ? `hsl(${(140 + i * 28) % 360} 48% ${50 + (i % 3) * 6}%)`
+      : `hsl(${(140 + i * 28) % 360} 55% ${42 + (i % 3) * 6}%)`
   );
 
   const ctxU = $("#chart-units");
@@ -785,8 +804,15 @@ function renderAnalyticsCharts(chart) {
         responsive: true,
         plugins: { legend: { display: false } },
         scales: {
-          x: { ticks: { maxRotation: 45, minRotation: 0, font: { size: 10 } } },
-          y: { beginAtZero: true },
+          x: {
+            ticks: { maxRotation: 45, minRotation: 0, font: { size: 10 }, color: ui.tick },
+            grid: { color: ui.grid },
+          },
+          y: {
+            beginAtZero: true,
+            ticks: { color: ui.tick },
+            grid: { color: ui.grid },
+          },
         },
       },
     });
@@ -806,7 +832,12 @@ function renderAnalyticsCharts(chart) {
       },
       options: {
         responsive: true,
-        plugins: { legend: { position: "bottom", labels: { boxWidth: 12, font: { size: 10 } } } },
+        plugins: {
+          legend: {
+            position: "bottom",
+            labels: { boxWidth: 12, font: { size: 10 }, color: ui.ink },
+          },
+        },
       },
     });
   }
@@ -1424,6 +1455,10 @@ document.addEventListener("click", (e) => {
     e.preventDefault();
     viewWeek(id);
   }
+});
+
+document.addEventListener("fp-theme-change", () => {
+  if (lastChartPayload) renderAnalyticsCharts(lastChartPayload);
 });
 
 init();
